@@ -1,0 +1,50 @@
+# 魔法水桶：本地源码恢复版本
+
+当前版本 `1.2.14.0`，基于 [MiSaKaQAQ/MagicBucket v1.2.13](https://github.com/MiSaKaQAQ/MagicBucket/releases/tag/v1.2.13) 发布包恢复。上游 Git 仓库只有安装索引，没有公开 C# 源码；`src/SrankFlag` 是通过 ILSpy 11.2.0.10050 反编译 DLL 后修复编译问题的代码，不是作者原始工程。原作者信息 `hunhuan` 保留在插件清单中。
+
+## 本地增强
+
+- 主列表勾选“开闸”只显示已进闸，取消只显示冷却中、尚未进闸的 S，并显示进闸倒计时。空列表不自动回退为全部。
+- 主窗、自动前往、触发悬浮窗、设置、历史及条件订阅窗都可拖动右下角的原生纹理角标调整宽高，分别记忆尺寸。列宽和按钮重排，长文字自动缩放、换行或截断，并提供完整悬停提示；高度不足时滚动。
+- 精确设置：`/水桶 size main 820 620`。窗口名支持 `main`、`auto`、`hud`、`settings`、`history`、`conditions`。
+- 主窗右键 S 怪行展开详情：条件说明、倒计时、北京时间起止和目的地操作各自排版。新增内容增加详情高度，窄窗换行；完整触发说明可悬停查看。也可用 `/水桶 detail 虚无探索者` 打开当前筛选内的详情。
+- `/水桶 conditions` 或主窗“条件订阅”打开可选条件窗。参考主站，平时只显示怪名、倒计时和已进闸服的色签，触发方法与各服冷却放到悬停提示；搜索、全选和逐只勾选放在“订阅”面板。
+- 默认订阅 13 只天气、ET 或月相 S；全部 47 只仍可在订阅管理选择。未进入条件为红色，距开始不超过 5 分钟为黄色，条件内为绿色。其他 S 显示“无固定时间窗”，不编造倒计时或行动条件已完成标记。各服 CD 与条件时间分别计算。
+- 原生文字、状态色、悬停色和历史底色随游戏主题适配。有底纹的原生按钮保留白字。服名跨窗口保持同色；豆豆柴五服参考主站，其他服使用稳定且不同的颜色。
+
+条件数据取自 2026-11-14 的[主站目录及悬浮窗](http://119.29.119.179/srank/)，保存于 `assets/hunt_conditions.json`。使用 52 个主站独立计算样本对账，并检查开始、5 分钟、结束边界、巨大鳐的跨日持续窗口、全部 S 的目录覆盖与服务器配色。框架用法记录见 [KamiToolKit.md](docs/KamiToolKit.md)。
+
+## 本地开发
+
+需要 .NET 10 SDK 和 API 15 的 Dalamud。当前工程默认读取 `%APPDATA%\XIVLauncherCN\addon\Hooks\dev`，可通过 `DALAMUD_HOME` 环境变量或脚本参数指定其他 SDK 目录。
+
+在 PowerShell 中运行：
+
+```powershell
+.\build-local.ps1
+# 自定义 Dalamud SDK：
+.\build-local.ps1 -DalamudLibPath 'C:\path\to\Dalamud'
+```
+
+脚本将编译文件部署到 `artifacts/dev/SrankFlag/`。已注册的开发插件路径为该目录下的 `SrankFlag.dll`；在当前游戏中已开启自动重载，重新运行脚本后 Dalamud 会自动加载更新。重建脚本先复制依赖，最后复制主 DLL；现有设置和运行缓存保留，`srank_data.json` 仅首次部署时初始化。
+
+游戏内使用 `/水桶` 或 `/srankflag` 开关主窗口；`/水桶 settings` 打开设置。插件名称为“魔法水桶”，本地加载时在开发插件列表管理。
+
+运行 `./build-release.ps1` 生成 `artifacts/release/v1.2.14.0/SrankFlag.zip` 和 SHA256 校验文件。发布脚本只打包明确列出的程序集、初始狩猎数据和许可证，不包含本地偏好、缓存或订阅设置。正式发布说明见 [release-notes.zh-CN.md](release-notes.zh-CN.md)。
+
+## 恢复范围
+
+- `src/SrankFlag/SrankFlag/`：插件逻辑、原生窗口、触发条件和历史记录代码。
+- `lib/`：上游发布包中的 `KamiToolKit.dll` 与 `FFXIVClientStructs.Expansion.dll`；此处保留二进制依赖。
+- `assets/`：发布包中的图标和初始狩猎数据。
+- `repo.json`：当前 Fork 的安装索引，下载地址指向本仓库对应版本的 Release。Laficia 的合并卫月库位于 [HuntHelperCN/pluginmaster.json](https://raw.githubusercontent.com/Laficia/HuntHelperCN/main/pluginmaster.json)。
+
+恢复阶段修正了反编译后 `Chip` 调用的命名参数不匹配问题，重新建立项目引用、资源复制和本地部署方式；后续本地增强列于上文。反编译无法还原原始注释、所有局部变量名称和项目历史。
+
+## 已验证
+
+2026-11-14：Release 编译成功，0 个错误，298 个警告（包括恢复代码中的空值注解及未使用字段等）。主题颜色检查、52 个主站时间样本、5 分钟与起止边界、巨大鳐的跨日窗口、47 只 S 目录和订阅保存检查通过。通过 DalamudMCP 验证本地 `1.2.14.0` 已加载，文件与运行程序集 MVID 一致且达到稳定就绪状态，自动重载已开启。
+
+游戏内核对 ClearWhite 主题的主窗正常及最窄宽度详情，倒计时、起止时间和操作区没有重叠；核对精简条件窗服务器色签、设置窗 300×220 和 820×650 尺寸变化。其他窗口检查了原生尺寸改变。真实鼠标拖动缩放及其他主题的逐屏检查尚未完成。
+
+尚未验证跨服传送、自动触发、寻路、丢弃物品等游戏操作。

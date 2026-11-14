@@ -1,0 +1,314 @@
+[
+  {
+    "En": "Laideronnette",
+    "Now": 1794657600,
+    "Start": 1794752800,
+    "End": 1794753800
+  },
+  {
+    "En": "Laideronnette",
+    "Now": 1794660000,
+    "Start": 1794752800,
+    "End": 1794753800
+  },
+  {
+    "En": "Laideronnette",
+    "Now": 1794700000,
+    "Start": 1794752800,
+    "End": 1794753800
+  },
+  {
+    "En": "Laideronnette",
+    "Now": 1794800000,
+    "Start": 1794849400,
+    "End": 1794850400
+  },
+  {
+    "En": "The Garlok",
+    "Now": 1794657600,
+    "Start": 1794656600,
+    "End": 1794660000
+  },
+  {
+    "En": "The Garlok",
+    "Now": 1794660000,
+    "Start": 1794688800,
+    "End": 1794690800
+  },
+  {
+    "En": "The Garlok",
+    "Now": 1794700000,
+    "Start": 1794704200,
+    "End": 1794710400
+  },
+  {
+    "En": "The Garlok",
+    "Now": 1794800000,
+    "Start": 1794806400,
+    "End": 1794811200
+  },
+  {
+    "En": "Zona Seeker",
+    "Now": 1794657600,
+    "Start": 1794653000,
+    "End": 1794658600
+  },
+  {
+    "En": "Zona Seeker",
+    "Now": 1794660000,
+    "Start": 1794662800,
+    "End": 1794672600
+  },
+  {
+    "En": "Zona Seeker",
+    "Now": 1794700000,
+    "Start": 1794695000,
+    "End": 1794700600
+  },
+  {
+    "En": "Zona Seeker",
+    "Now": 1794800000,
+    "Start": 1794801400,
+    "End": 1794804200
+  },
+  {
+    "En": "Croque-Mitaine",
+    "Now": 1794657600,
+    "Start": 1794659125,
+    "End": 1794659650
+  },
+  {
+    "En": "Croque-Mitaine",
+    "Now": 1794660000,
+    "Start": 1794663325,
+    "End": 1794663850
+  },
+  {
+    "En": "Croque-Mitaine",
+    "Now": 1794700000,
+    "Start": 1794701125,
+    "End": 1794701650
+  },
+  {
+    "En": "Croque-Mitaine",
+    "Now": 1794800000,
+    "Start": 1794801925,
+    "End": 1794802450
+  },
+  {
+    "En": "Bonnacon",
+    "Now": 1794657600,
+    "Start": 1794657200,
+    "End": 1794657725
+  },
+  {
+    "En": "Bonnacon",
+    "Now": 1794660000,
+    "Start": 1794661400,
+    "End": 1794661925
+  },
+  {
+    "En": "Bonnacon",
+    "Now": 1794700000,
+    "Start": 1794703400,
+    "End": 1794703925
+  },
+  {
+    "En": "Bonnacon",
+    "Now": 1794800000,
+    "Start": 1794800000,
+    "End": 1794800525
+  },
+  {
+    "En": "Thousand-cast Theda",
+    "Now": 1794657600,
+    "Start": 1794658775,
+    "End": 1794659475
+  },
+  {
+    "En": "Thousand-cast Theda",
+    "Now": 1794660000,
+    "Start": 1794662975,
+    "End": 1794663675
+  },
+  {
+    "En": "Thousand-cast Theda",
+    "Now": 1794700000,
+    "Start": 1794700775,
+    "End": 1794701475
+  },
+  {
+    "En": "Thousand-cast Theda",
+    "Now": 1794800000,
+    "Start": 1794801575,
+    "End": 1794802275
+  },
+  {
+    "En": "Gamma",
+    "Now": 1794657600,
+    "Start": 1794658775,
+    "End": 1794661400
+  },
+  {
+    "En": "Gamma",
+    "Now": 1794660000,
+    "Start": 1794658775,
+    "End": 1794661400
+  },
+  {
+    "En": "Gamma",
+    "Now": 1794700000,
+    "Start": 1794700775,
+    "End": 1794703400
+  },
+  {
+    "En": "Gamma",
+    "Now": 1794800000,
+    "Start": 1794801575,
+    "End": 1794804200
+  },
+  {
+    "En": "Mindflayer",
+    "Now": 1794657600,
+    "Start": 1794658775,
+    "End": 1794660525
+  },
+  {
+    "En": "Mindflayer",
+    "Now": 1794660000,
+    "Start": 1794658775,
+    "End": 1794660525
+  },
+  {
+    "En": "Mindflayer",
+    "Now": 1794700000,
+    "Start": 1794777600,
+    "End": 1794782325
+  },
+  {
+    "En": "Mindflayer",
+    "Now": 1794800000,
+    "Start": 1794912000,
+    "End": 1794916725
+  },
+  {
+    "En": "Croakadile",
+    "Now": 1794657600,
+    "Start": 1794709175,
+    "End": 1794710925
+  },
+  {
+    "En": "Croakadile",
+    "Now": 1794660000,
+    "Start": 1794709175,
+    "End": 1794710925
+  },
+  {
+    "En": "Croakadile",
+    "Now": 1794700000,
+    "Start": 1794709175,
+    "End": 1794710925
+  },
+  {
+    "En": "Croakadile",
+    "Now": 1794800000,
+    "Start": 1794843575,
+    "End": 1794845325
+  },
+  {
+    "En": "Okina",
+    "Now": 1794657600,
+    "Start": 1794708300,
+    "End": 1794725100
+  },
+  {
+    "En": "Okina",
+    "Now": 1794660000,
+    "Start": 1794708300,
+    "End": 1794725100
+  },
+  {
+    "En": "Okina",
+    "Now": 1794700000,
+    "Start": 1794708300,
+    "End": 1794725100
+  },
+  {
+    "En": "Okina",
+    "Now": 1794800000,
+    "Start": 1794842700,
+    "End": 1794859500
+  },
+  {
+    "En": "Burfurlur the Canny",
+    "Now": 1794657600,
+    "Start": 1794657375,
+    "End": 1794658600
+  },
+  {
+    "En": "Burfurlur the Canny",
+    "Now": 1794660000,
+    "Start": 1794662800,
+    "End": 1794662975
+  },
+  {
+    "En": "Burfurlur the Canny",
+    "Now": 1794700000,
+    "Start": 1794699375,
+    "End": 1794700600
+  },
+  {
+    "En": "Burfurlur the Canny",
+    "Now": 1794800000,
+    "Start": 1794801400,
+    "End": 1794801575
+  },
+  {
+    "En": "Kirlirger the Abhorrent",
+    "Now": 1794657600,
+    "Start": 1795588200,
+    "End": 1795589600
+  },
+  {
+    "En": "Kirlirger the Abhorrent",
+    "Now": 1794660000,
+    "Start": 1795588200,
+    "End": 1795589600
+  },
+  {
+    "En": "Kirlirger the Abhorrent",
+    "Now": 1794700000,
+    "Start": 1795588200,
+    "End": 1795589600
+  },
+  {
+    "En": "Kirlirger the Abhorrent",
+    "Now": 1794800000,
+    "Start": 1795588200,
+    "End": 1795589600
+  },
+  {
+    "En": "Gandarewa",
+    "Now": 1794657600,
+    "Start": 1794658250,
+    "End": 1794658950
+  },
+  {
+    "En": "Gandarewa",
+    "Now": 1794660000,
+    "Start": 1794660350,
+    "End": 1794661050
+  },
+  {
+    "En": "Gandarewa",
+    "Now": 1794700000,
+    "Start": 1794700250,
+    "End": 1794700950
+  },
+  {
+    "En": "Gandarewa",
+    "Now": 1794800000,
+    "Start": 1794801050,
+    "End": 1794801750
+  }
+]
