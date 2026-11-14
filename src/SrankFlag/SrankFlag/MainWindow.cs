@@ -24,9 +24,7 @@ internal sealed class MainWindow : ResponsiveAddon
 
 		internal TextNode Name;
 
-		internal ColorImageNode BarBg;
-
-		internal ColorImageNode BarFg;
+		internal ProgressBarNode Bar;
 
 		internal TextNode Tail;
 
@@ -199,7 +197,7 @@ internal sealed class MainWindow : ResponsiveAddon
 
 	private const int MaxDcButtons = 8;
 
-	private readonly TextButtonNode?[] dcButtons = new TextButtonNode[8];
+	private readonly NativeRadioOption?[] dcButtons = new NativeRadioOption[8];
 
 	private readonly List<string> dcNames = new List<string>();
 
@@ -306,7 +304,7 @@ internal sealed class MainWindow : ResponsiveAddon
 
 	private TextButtonNode? bWorldMenu;
 
-	private TextButtonNode? bOnlyOpen;
+	private NativeCheckOption? bOnlyOpen;
 
 	private TextButtonNode? bWorldAll;
 
@@ -314,9 +312,9 @@ internal sealed class MainWindow : ResponsiveAddon
 
 	private TextButtonNode? bWorldCurrent;
 
-	private readonly TextButtonNode?[] worldMenuItems = new TextButtonNode[16];
+	private readonly NativeCheckOption?[] worldMenuItems = new NativeCheckOption[16];
 
-	private readonly TextButtonNode?[] patchButtons = new TextButtonNode[7];
+	private readonly NativeCheckOption?[] patchButtons = new NativeCheckOption[7];
 
 	private TextNode? listTitle;
 
@@ -576,10 +574,11 @@ internal sealed class MainWindow : ResponsiveAddon
 			{
 				menuOpen = !menuOpen;
 			});
-			bOnlyOpen = B(contentStartPosition, 104f, 26f, "开闸", () =>
+			bOnlyOpen = new NativeCheckOption(() =>
 			{
 				actions.ToggleOnlyOpen();
 			});
+			bOnlyOpen.AttachNode(fixedRoot);
 			counts = T(contentStartPosition, 400f, 20f, 11u, "");
 			bManualHint = T(contentStartPosition, 160f, 20f, 11u, "");
 			bManualHint.TextColor = MutedText;
@@ -602,7 +601,7 @@ internal sealed class MainWindow : ResponsiveAddon
 			for (int num = 0; num < 16; num++)
 			{
 				int idx = num;
-				worldMenuItems[num] = B(contentStartPosition, 216f, 24f, "", () =>
+				worldMenuItems[num] = new NativeCheckOption(() =>
 				{
 					string text = worldNames[idx];
 					if (text.Length > 0)
@@ -610,28 +609,30 @@ internal sealed class MainWindow : ResponsiveAddon
 						actions.ToggleWorld(text);
 					}
 				});
+				worldMenuItems[num].AttachNode(fixedRoot);
 			}
 			for (int num2 = 0; num2 < 7; num2++)
 			{
 				int idx2 = num2;
-				patchButtons[num2] = B(contentStartPosition, 42f, 22f, "", () =>
+				patchButtons[num2] = new NativeCheckOption(() =>
 				{
+					if(patchKeysArr[idx2].Length>0)actions.TogglePatch(patchKeysArr[idx2]);
 				});
+				patchButtons[num2].AttachNode(fixedRoot);
 				WirePatchClick(patchButtons[num2], idx2);
-				NativeButtonStyle.CompactRadio(patchButtons[num2], "", 22f, on: false);
 				patchButtons[num2].IsVisible = false;
 			}
 			for (int num3 = 0; num3 < 8; num3++)
 			{
 				int idx3 = num3;
-				dcButtons[num3] = B(contentStartPosition, 90f, 22f, "", () =>
+				dcButtons[num3] = new NativeRadioOption(() =>
 				{
 					if (idx3 < dcNames.Count)
 					{
 						actions.SelectDc(dcNames[idx3]);
 					}
 				});
-				NativeButtonStyle.CompactRadio(dcButtons[num3], "", 22f, on: false);
+				dcButtons[num3].AttachNode(fixedRoot);
 				dcButtons[num3].IsVisible = false;
 			}
 			listTitle = T(contentStartPosition, 500f, 20f, 12u, "");
@@ -732,18 +733,7 @@ internal sealed class MainWindow : ResponsiveAddon
 					FontType = FontType.Axis,
 					TextColor = ListText
 				},
-				BarBg = new ColorImageNode
-				{
-					Position = contentStartPosition,
-					Size = new Vector2(232f, 12f),
-					Color = BarDeep
-				},
-				BarFg = new ColorImageNode
-				{
-					Position = contentStartPosition,
-					Size = new Vector2(232f, 12f),
-					Color = BarFill
-				},
+				Bar = new ProgressBarNode { Position=contentStartPosition, Size=new Vector2(232,12) },
 				Tail = new TextNode
 				{
 					Position = contentStartPosition,
@@ -766,20 +756,16 @@ internal sealed class MainWindow : ResponsiveAddon
 			};
 			rowNodes.World.AttachNode(content);
 			rowNodes.Name.AttachNode(content);
-			rowNodes.BarBg.AttachNode(content);
-			rowNodes.BarFg.AttachNode(content);
+			rowNodes.Bar.AttachNode(content);
 			rowNodes.Tail.AttachNode(content);
 			rowNodes.Badge.AttachNode(content);
 			TextButtonNode hit = rowNodes.Hit;
 			TextNode world = rowNodes.World;
 			TextNode name = rowNodes.Name;
-			ColorImageNode barBg = rowNodes.BarBg;
-			ColorImageNode barFg = rowNodes.BarFg;
 			TextNode tail = rowNodes.Tail;
 			bool flag = (rowNodes.Badge.IsVisible = false);
 			bool flag3 = (tail.IsVisible = flag);
-			bool flag5 = (barFg.IsVisible = flag3);
-			bool flag7 = (barBg.IsVisible = flag5);
+			bool flag7 = (rowNodes.Bar.IsVisible = flag3);
 			bool flag9 = (name.IsVisible = flag7);
 			bool flag11 = (world.IsVisible = flag9);
 			hit.IsVisible = flag11;
@@ -788,14 +774,14 @@ internal sealed class MainWindow : ResponsiveAddon
 		}
 	}
 
-	private unsafe void WirePatchClick(TextButtonNode b, int idx)
+	private unsafe void WirePatchClick(NativeCheckOption b, int idx)
 	{
 		AtkEventListener.Delegates.ReceiveEvent callback = (AtkEventListener* _, AtkEventType _, int _, AtkEvent* _, AtkEventData* data) =>
 		{
 			if (data != null)
 			{
 				byte buttonId = data->MouseData.ButtonId;
-				if (buttonId == 0 || buttonId == 1)
+				if (buttonId == 1)
 				{
 					string text = patchKeysArr[idx] ?? "";
 					if (text.Length != 0)
@@ -820,8 +806,10 @@ internal sealed class MainWindow : ResponsiveAddon
 				}
 			}
 		};
-		b.AddEvent(AtkEventType.MouseDown, callback);
-		b.AddEvent(AtkEventType.MouseClick, callback);
+		// A direct MouseDown on the component owner creates a new blocking hit target
+		// ahead of its native checkbox collision node, so left clicks never become
+		// ButtonClick. Observe right clicks on the existing native collision node.
+		b.CollisionNode.AddEvent(AtkEventType.MouseDown, callback);
 	}
 
 	private void SetSort(SortBy by)
@@ -1196,7 +1184,7 @@ internal sealed class MainWindow : ResponsiveAddon
 			NativeButtonStyle.Apply(bRefresh, s.Fetching ? "…" : "刷新", 80f, 26f, selected: false);
 			NativeButtonStyle.Apply(bAuto, "前往", 96f, 26f, selected: false);
 			NativeButtonStyle.Apply(bStop, "停止", 80f, 26f, selected: false);
-			NativeButtonStyle.Apply(bOnlyOpen, s.OnlyOpen ? "✓ 开闸" : "□ 开闸", 110f, 26f, s.OnlyOpen);
+			bOnlyOpen.Apply("开闸",s.OnlyOpen,110);
 			NativeButtonStyle.Apply(bWorldMenu, (menuOpen ? "▾ " : "▸ ") + s.WorldMenuLabel, 230f, 26f, menuOpen);
 			NativeButtonStyle.MiniAction(bWorldAll, "全服", 22f, on: false);
 			NativeButtonStyle.MiniAction(bWorldClear, "清空", 22f, on: false);
@@ -1225,14 +1213,14 @@ internal sealed class MainWindow : ResponsiveAddon
 		}
 		for (int j = 0; j < 8; j++)
 		{
-			TextButtonNode textButtonNode = dcButtons[j];
+			NativeRadioOption textButtonNode = dcButtons[j];
 			if (textButtonNode != null && (textButtonNode.IsVisible = j < dcNames.Count))
 			{
 				string text = dcNames[j];
 				bool flag2 = string.Equals(text, s.DcSelected, StringComparison.Ordinal);
 				try
 				{
-					NativeButtonStyle.CompactRadio(textButtonNode, text, 22f, flag2);
+					textButtonNode.Apply(text,flag2,120);
 				}
 				catch (Exception ex2)
 				{
@@ -1253,13 +1241,13 @@ internal sealed class MainWindow : ResponsiveAddon
 			}
 			for (int l = 0; l < 7; l++)
 			{
-				TextButtonNode textButtonNode2 = patchButtons[l];
+				NativeCheckOption textButtonNode2 = patchButtons[l];
 				if (textButtonNode2 != null && (textButtonNode2.IsVisible = l < patchLabels.Count))
 				{
 					bool flag4 = l < s.PatchOn.Count && s.PatchOn[l];
 					try
 					{
-						NativeButtonStyle.CompactRadio(textButtonNode2, patchLabels[l], 22f, flag4);
+						textButtonNode2.Apply(patchLabels[l],flag4,90);
 					}
 					catch (Exception ex3)
 					{
@@ -1283,11 +1271,10 @@ internal sealed class MainWindow : ResponsiveAddon
 			{
 				text3 = (flag5 ? "●" : "○");
 			}
-			TextButtonNode textButtonNode3 = worldMenuItems[m];
+			NativeCheckOption textButtonNode3 = worldMenuItems[m];
 			try
 			{
-				NativeButtonStyle.Radio(textButtonNode3, text3 + " " + text2, 140f, 24f, flag5);
-				NativeButtonStyle.Paint(textButtonNode3, ServerColors.ForWorld(text2), ServerColors.ForWorld(text2));
+				textButtonNode3.Apply(text2,flag5,140,textColor:ServerColors.ForWorld(text2));
 			}
 			catch (Exception ex4)
 			{
@@ -1318,8 +1305,7 @@ internal sealed class MainWindow : ResponsiveAddon
 			ShowNode(rn.Hit, flag6);
 			ShowNode(rn.World, flag6);
 			ShowNode(rn.Name, flag6);
-			ShowNode(rn.BarBg, flag6);
-			ShowNode(rn.BarFg, flag6);
+			ShowNode(rn.Bar, flag6);
 			ShowNode(rn.Tail, flag6);
 			ShowNode(rn.Badge, flag6 && r != null && r.Triggered);
 			if (r != null)
@@ -1344,7 +1330,7 @@ internal sealed class MainWindow : ResponsiveAddon
 				RowStep("血条", () =>
 				{
 					float prog = ((r.State == "unknown") ? 0f : Math.Clamp((float)r.PctValue / 100f, 0f, 1f));
-					rn.FillW = PaintBar(rn.BarBg, rn.BarFg, 232f, 12f, prog);
+					rn.Bar.Progress = prog;
 				}, r.En);
 				RowStep("百分比", () =>
 				{
@@ -1472,11 +1458,10 @@ internal sealed class MainWindow : ResponsiveAddon
 				foreach (var item2 in list3)
 				{
 					(string, Vector4, Vector4, Action) tuple = list[num9];
-					float num10 = NativeButtonStyle.Measure(tuple.Item1) + 16f;
+					float num10 = NativeButtonStyle.Measure(tuple.Item1) + 32f;
 					TextButtonNode textButtonNode4 = detailBtns[num9];
 					textButtonNode4.IsVisible = true;
 					NativeButtonStyle.SizePin(textButtonNode4, num10, 22f);
-					NativeButtonStyle.HideBackground(textButtonNode4);
 					NativeButtonStyle.Paint(textButtonNode4, tuple.Item2, tuple.Item3);
 					NativeButtonStyle.SetLabel(textButtonNode4, tuple.Item1);
 					detailActions[num9] = tuple.Item4;
@@ -1485,11 +1470,10 @@ internal sealed class MainWindow : ResponsiveAddon
 				}
 				foreach (var item3 in list2)
 				{
-					float num11 = NativeButtonStyle.Measure(item3.Item1) + 16f;
+					float num11 = NativeButtonStyle.Measure(item3.Item1) + 32f;
 					TextButtonNode textButtonNode5 = detailBtns[num9];
 					textButtonNode5.IsVisible = true;
 					NativeButtonStyle.SizePin(textButtonNode5, num11, 22f);
-					NativeButtonStyle.HideBackground(textButtonNode5);
 					NativeButtonStyle.Paint(textButtonNode5, item3.Item2, item3.Item3);
 					NativeButtonStyle.SetLabel(textButtonNode5, item3.Item1);
 					detailActions[num9] = item3.Item4;
@@ -1548,14 +1532,19 @@ internal sealed class MainWindow : ResponsiveAddon
         if (scroll == null || content == null || fixedRoot == null) return;
         float w = BodyWidth - 12, y = 0;
         fixedRoot.Position = Vector2.Zero;
-        searchInput.Width = Math.Clamp(w * .40f, 130, 360);
+        float searchWidth=MathF.Floor(Math.Clamp(w*.28f,90,180));
+        if(MathF.Abs(searchInput.Width-searchWidth)>.1f)searchInput.Width=searchWidth;
         bDc.IsVisible = false;
-        y = Flow(w, y, searchInput, bClearSearch, bConditions, bHistory, bSettings, bRefresh);
+        y = Flow(w, y, searchInput, bClearSearch, bRefresh);
+        y = Flow(w, y, bConditions, bHistory, bSettings);
         bManualHint.IsVisible = s.NeedsManualRefresh;
-        if (s.NeedsManualRefresh) { bManualHint.String = s.Fetching ? "正在从熊站拉取…" : "当前大区数据需手动刷新"; bManualHint.Fit(w, 11, true); y = Flow(w, y, bManualHint); }
-        y = Flow(w, y, dcButtons.Concat(patchButtons).Cast<NodeBase?>().ToArray());
+        if (s.NeedsManualRefresh) { bManualHint.String = s.Fetching ? "公开熊站 · 手动加载中…" : "公开熊站 · 点击“刷新”手动加载"; bManualHint.Fit(w, 11, true); y = Flow(w, y, bManualHint); }
+        y = Flow(w, y, dcButtons);
+        y = Flow(w, y, patchButtons);
         bWorldAll.IsVisible = bWorldClear.IsVisible = bWorldCurrent.IsVisible = menuOpen;
-        y = Flow(w, y, bAuto, bStop, bOnlyOpen, bWorldMenu, bWorldAll, bWorldClear, bWorldCurrent);
+        y = Flow(w, y, bAuto, bStop);
+        y = Flow(w, y, bOnlyOpen, bWorldMenu);
+        if(menuOpen)y=Flow(w,y,bWorldAll,bWorldClear,bWorldCurrent);
         counts.IsVisible = true; counts.Fit(w, 11); y = Flow(w, y, counts);
         for (int i = 0; i < worldMenuItems.Length; i++) worldMenuItems[i].IsVisible = menuOpen && i < s.Worlds.Count;
         if (menuOpen) y = Flow(w, y, worldMenuItems.Cast<NodeBase?>().ToArray());
@@ -1565,14 +1554,14 @@ internal sealed class MainWindow : ResponsiveAddon
         sortHeaders[0].Position = new Vector2(worldX, y);
         sortHeaders[1].Position = new Vector2(nameX, y);
         sortHeaders[2].Position = new Vector2(barX, y);
-        y += 26;
+        y += 30;
         fixedRoot.Size = new Vector2(w, y);
         for (int i = 0; i < rows.Count; i++)
         {
             var row = rows[i];
             if (i >= s.Hunts.Count)
             {
-                foreach (var node in new NodeBase[] {row.Hit,row.World,row.Name,row.BarBg,row.BarFg,row.Tail,row.Badge}) node.IsVisible = false;
+                foreach (var node in new NodeBase[] {row.Hit,row.World,row.Name,row.Bar,row.Tail,row.Badge}) node.IsVisible = false;
                 continue;
             }
             var hunt = s.Hunts[i];
@@ -1581,11 +1570,12 @@ internal sealed class MainWindow : ResponsiveAddon
             row.World.Position = new Vector2(worldX,y+4); row.World.Fit(columns.WorldWidth,13);
             row.Name.Position = new Vector2(nameX,y+4); row.Name.Fit(columns.NameWidth - (hunt.Triggered ? 44 : 0),13);
             row.Badge.Position = new Vector2(barX-44,y+4); row.Badge.IsVisible = hunt.Triggered;
-            row.BarBg.IsVisible = row.BarFg.IsVisible = open;
+            row.Bar.IsVisible = open;
             if (open)
             {
-                row.FillW = PaintBar(row.BarBg,row.BarFg,barW,12,Math.Clamp((float)hunt.PctValue/100f,0,1));
-                row.BarFg.Position = new Vector2(barX,y+8); row.BarBg.Position = new Vector2(barX+row.FillW,y+8);
+                row.Bar.Size=new Vector2(barW,12);
+                row.Bar.Progress=Math.Clamp((float)hunt.PctValue/100f,0,1);
+                row.Bar.Position=new Vector2(barX,y+8);
             }
             row.Tail.Position = new Vector2(open ? barX+barW+6 : barX,y+4);
             row.Tail.AlignmentType = open ? AlignmentType.Right : AlignmentType.Left;

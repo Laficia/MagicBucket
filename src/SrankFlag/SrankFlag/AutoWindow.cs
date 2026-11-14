@@ -69,7 +69,7 @@ internal sealed class AutoWindow : ResponsiveAddon
 
 	private readonly string[] rowKeys = new string[16];
 
-	private readonly TextButtonNode?[] tools = new TextButtonNode[7];
+	private readonly NodeBase?[] tools = new NodeBase[7];
 
 	private bool setupDone;
 
@@ -115,11 +115,11 @@ internal sealed class AutoWindow : ResponsiveAddon
 
 	private ColorImageNode? sepLine;
 
-	private readonly TextButtonNode?[] chips = new TextButtonNode[16];
+	private readonly NativeCheckOption?[] chips = new NativeCheckOption[16];
 
 	private readonly TextNode?[] queueLines = new TextNode[6];
 
-	private readonly TextButtonNode?[] huntButtons = new TextButtonNode[16];
+	private readonly NativeCheckOption?[] huntButtons = new NativeCheckOption[16];
 
 	private readonly TextNode?[] huntStates = new TextNode[16];
 
@@ -149,23 +149,23 @@ internal sealed class AutoWindow : ResponsiveAddon
 		{
 			actions.ClearHit();
 		});
-		tools[0] = B(contentStartPosition, ToolW[0], 24f, "分组", () =>
+		tools[0] = new NativeRadioOption(() =>
 		{
 			actions.GroupStyle();
 		});
-		tools[1] = B(contentStartPosition, ToolW[1], 24f, "卡片", () =>
+		tools[1] = new NativeRadioOption(() =>
 		{
 			actions.CardStyle();
 		});
-		tools[2] = B(contentStartPosition, ToolW[2], 24f, "只看开闸", () =>
+		tools[2] = new NativeCheckOption(() =>
 		{
 			actions.ToggleOnlyOpen();
 		});
-		tools[3] = B(contentStartPosition, ToolW[3], 24f, "触发悬浮窗", () =>
+		tools[3] = new NativeCheckOption(() =>
 		{
 			actions.ToggleHud();
 		});
-		tools[4] = B(contentStartPosition, ToolW[4], 24f, "全部服务器", () =>
+		tools[4] = new NativeCheckOption(() =>
 		{
 			actions.ToggleAllWorlds();
 		});
@@ -177,6 +177,7 @@ internal sealed class AutoWindow : ResponsiveAddon
 		{
 			actions.ClearWorlds();
 		});
+		for(int i=0;i<5;i++){tools[i].AttachNode(content);allNodes.Add(tools[i]);}
 		sepLine = new ColorImageNode
 		{
 			Position = contentStartPosition,
@@ -190,10 +191,11 @@ internal sealed class AutoWindow : ResponsiveAddon
 		for (int num = 0; num < 16; num++)
 		{
 			int idx = num;
-			chips[num] = B(contentStartPosition, 76f, 24f, "", () =>
+			chips[num] = new NativeCheckOption(() =>
 			{
 				ClickWorld(idx);
 			});
+			chips[num].AttachNode(content);allNodes.Add(chips[num]);
 		}
 		queueTitle = T(contentStartPosition, 636f, 18f, 12u, "");
 		queueTitle.TextColor = MutedText;
@@ -213,10 +215,11 @@ internal sealed class AutoWindow : ResponsiveAddon
 		for (int num3 = 0; num3 < 16; num3++)
 		{
 			int idx2 = num3;
-			huntButtons[num3] = B(contentStartPosition, 212f, 24f, "", () =>
+			huntButtons[num3] = new NativeCheckOption(() =>
 			{
 				ClickHunt(idx2);
 			});
+			huntButtons[num3].AttachNode(content);allNodes.Add(huntButtons[num3]);
 			huntStates[num3] = T(contentStartPosition, 100f, 18f, 10u, "");
 			huntStates[num3].TextColor = MutedText;
 		}
@@ -294,13 +297,11 @@ internal sealed class AutoWindow : ResponsiveAddon
 		bool[] array2 = new bool[7] { s.StyleGroup, s.StyleCard, s.OnlyOpen, s.HudOpen, s.AllWorlds, false, false };
 		for (int i = 0; i < tools.Length; i++)
 		{
-			if (i < 5)
-			{
-				NativeButtonStyle.PlainRadio(tools[i], array[i], 150f, 24f, array2[i], dimOff: true);
-			}
+			if (tools[i] is NativeRadioOption radio)radio.Apply(array[i],array2[i],150);
+			else if(tools[i] is NativeCheckOption check)check.Apply(array[i],array2[i],150);
 			else
 			{
-				NativeButtonStyle.Apply(tools[i], array[i], 150f, 24f, selected: false);
+				NativeButtonStyle.Apply((TextButtonNode)tools[i], array[i], 150f, 24f, selected: false);
 			}
 		}
 		NativeButtonStyle.FitText(worldCaption, s.WorldCaption, 636f);
@@ -310,8 +311,7 @@ internal sealed class AutoWindow : ResponsiveAddon
 			string text = ((j < s.Worlds.Count) ? s.Worlds[j] : "");
 			worldNames[j] = text;
 			bool flag = j < s.WorldOn.Count && s.WorldOn[j];
-			NativeButtonStyle.Radio(chips[j], (flag ? "● " : "○ ") + text, 118f, 24f, flag);
-			NativeButtonStyle.Paint(chips[j], ServerColors.ForWorld(text), ServerColors.ForWorld(text));
+			chips[j].Apply(text,flag,140,textColor:ServerColors.ForWorld(text));
 		}
 		NativeButtonStyle.FitText(queueTitle, s.QueueTitle, 300f);
 		for (int k = 0; k < 6; k++)
@@ -324,7 +324,7 @@ internal sealed class AutoWindow : ResponsiveAddon
 		{
 			AutoHuntRow autoHuntRow = ((num + l < s.Hunts.Count) ? s.Hunts[num + l] : null);
 			rowKeys[l] = autoHuntRow?.Key ?? "";
-			NativeButtonStyle.Apply(huntButtons[l], (autoHuntRow == null) ? "" : ((autoHuntRow.Checked ? "✓ " : "□ ") + autoHuntRow.Label), 200f, 24f, autoHuntRow?.Checked ?? false);
+			huntButtons[l].Apply(autoHuntRow?.Label??"",autoHuntRow?.Checked??false,200);
 			NativeButtonStyle.FitText(huntStates[l], autoHuntRow?.Right ?? "", 140f);
 		}
 		NativeButtonStyle.Apply(bPrev, "← 上一页", 120f, 24f, selected: false);
@@ -356,7 +356,9 @@ internal sealed class AutoWindow : ResponsiveAddon
         hit1.IsVisible=hit2.IsVisible=clearHit.IsVisible=s.ShowHitBar;
         if(s.ShowHitBar) {hit1.Fit(w,14,true);hit2.Fit(w,11,true);y=Flow(w,y,hit1);y=Flow(w,y,hit2);y=Flow(w,y,clearHit);}
         for(int i=0;i<tools.Length;i++)tools[i].IsVisible=i<5||showChips;
-        y=Flow(w,y,tools);
+        y=Flow(w,y,tools[0],tools[1]);
+        for(int i=2;i<5;i++)y=Flow(w,y,tools[i]);
+        if(showChips)y=Flow(w,y,tools[5],tools[6]);
         sepLine.Position=new Vector2(0,y);sepLine.Width=w;y+=8;
         worldCaption.Fit(w,11,true);y=Flow(w,y,worldCaption);
         for(int i=0;i<chips.Length;i++)chips[i].IsVisible=showChips&&i<s.Worlds.Count;
@@ -364,17 +366,14 @@ internal sealed class AutoWindow : ResponsiveAddon
         queueTitle.Fit(w,12);y=Flow(w,y,queueTitle);
         for(int i=0;i<queueLines.Length;i++){queueLines[i].IsVisible=i<s.QueueLines.Count;if(queueLines[i].IsVisible){queueLines[i].Fit(w,11,true);y=Flow(w,y,queueLines[i]);}}
         pageLabel.Fit(w,12);y=Flow(w,y,pageLabel);bPrev.IsVisible=s.Page>0;bNext.IsVisible=s.Page+1<s.PageCount;y=Flow(w,y,bPrev,bNext);
-        int columns=Math.Max(1,(int)(w/310)),index=0;float colW=(w-8*(columns-1))/columns,rowH=0,startY=y;
         for(int i=0;i<huntButtons.Length;i++)
         {
             var hunt=s.Page*16+i<s.Hunts.Count?s.Hunts[s.Page*16+i]:null;huntButtons[i].IsVisible=huntStates[i].IsVisible=hunt!=null;if(hunt==null)continue;
-            int col=index%columns;if(col==0&&index>0){startY+=rowH+6;rowH=0;}
-            NativeButtonStyle.Fixed(huntButtons[i],(hunt.Checked?"✓ ":"□ ")+hunt.Label,MathF.Max(120,colW-90),24,Vector4.One,NativeTheme.ButtonText);
-            huntButtons[i].Position=new Vector2(col*(colW+8),startY);
-            huntStates[i].Fit(84,10,true);huntStates[i].Position=new Vector2(col*(colW+8)+huntButtons[i].Width+6,startY+2);
-            rowH=MathF.Max(rowH,MathF.Max(huntButtons[i].Height,huntStates[i].Height));index++;
+            huntButtons[i].Apply(hunt.Label,hunt.Checked,w,w);
+            y=Flow(w,y,huntButtons[i]);
+            huntStates[i].Fit(w,11,true);y=Flow(w,y,huntStates[i]);
         }
-        y=startY+rowH+8;counts.Fit(w,11,true);y=Flow(w,y,bRun,counts);
+        counts.Fit(w,11,true);y=Flow(w,y,bRun);y=Flow(w,y,counts);
         foreach(var text in new[]{hints,status,skipped}){text.IsVisible=!text.String.IsEmpty;if(text.IsVisible){text.Fit(w,11,true);y=Flow(w,y,text);}}
         scroll.Position=ContentStartPosition;scroll.Size=new Vector2(BodyWidth,BodyHeight);content.Height=MathF.Max(y+8,BodyHeight);scroll.RecalculateSizes();scroll.ScrollBarNode.UpdateScrollParams();
     }

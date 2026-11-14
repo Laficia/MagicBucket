@@ -126,11 +126,11 @@ internal sealed class HudWindow : ResponsiveAddon
         badge.String=s.Badge;progress.String=s.Progress;job.String=s.Job;map.String=s.Map;next.String=s.Next;status.String=s.Status;
         float w=BodyWidth-12,y=0;badge.Fit(w*.60f,14);progress.Fit(w*.30f,12);y=Flow(w,y,badge,progress);
         foreach(var text in new[]{job,map,next,status,hint}){text.Fit(w,text==job?18u:12u,true);y=Flow(w,y,text);}
-        NativeButtonStyle.Fixed(primary,s.Primary,MathF.Max(120,(w-8)/2),28,Vector4.One,NativeTheme.ButtonText);
-        NativeButtonStyle.Fixed(skip,"停止这只，去下一个",MathF.Max(120,(w-8)/2),28,Vector4.One,NativeTheme.ButtonText);
-        NativeButtonStyle.Fixed(stop,"停止整队",MathF.Max(120,(w-8)/2),28,Vector4.One,NativeTheme.ButtonText);
-        NativeButtonStyle.Fixed(restart,"重新开始",MathF.Max(120,(w-8)/2),28,Vector4.One,NativeTheme.ButtonText);
-        y=Flow(w,y,primary,skip,stop,restart);
+        NativeButtonStyle.Fixed(primary,s.Primary,w,28,Vector4.One,NativeTheme.ButtonText);
+        NativeButtonStyle.Fixed(skip,"停止这只，去下一个",w,28,Vector4.One,NativeTheme.ButtonText);
+        NativeButtonStyle.Fixed(stop,"停止整队",w,28,Vector4.One,NativeTheme.ButtonText);
+        NativeButtonStyle.Fixed(restart,"重新开始",w,28,Vector4.One,NativeTheme.ButtonText);
+        foreach(var button in new[]{primary,skip,stop,restart})y=Flow(w,y,button);
         scroll.Position=ContentStartPosition;scroll.Size=new Vector2(BodyWidth,BodyHeight);content.Height=MathF.Max(y+8,BodyHeight);scroll.RecalculateSizes();scroll.ScrollBarNode.UpdateScrollParams();
     }
 

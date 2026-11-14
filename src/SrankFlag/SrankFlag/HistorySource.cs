@@ -3,5 +3,6 @@ namespace SrankFlag;
 public enum HistorySource
 {
 	MainSite,
-	Sonar
+	Sonar,
+	Bear
 }

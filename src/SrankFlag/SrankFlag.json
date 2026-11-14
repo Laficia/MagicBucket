@@ -2,8 +2,8 @@
   "Author": "hunhuan",
   "Name": "魔法水桶",
   "InternalName": "SrankFlag",
-  "AssemblyVersion": "1.2.14.0",
-  "Description": "四大区 S 怪开闸/窗口实时监控，按服筛选、绿点点位、2.0~7.0 版本过滤；点一下自动跨服传送、开图插旗、按最近邻走完所有绿点。附带触发要点与触发准备（切职业套装 / 召唤宠物 / 丢弃物品）。",
+  "AssemblyVersion": "1.2.14.1",
+  "Description": "四大区 S 怪开闸监控、条件订阅、原生窗口与版本筛选。豆豆柴自动读取主站；莫古力、猫小胖、陆行鸟手动直连公开熊站。窗口独立调整宽高，文字与状态色随主题适配。",
   "ApplicableVersion": "any",
   "RepoUrl": "https://github.com/Laficia/MagicBucket",
   "Tags": [
@@ -19,6 +19,6 @@
   "LoadSync": false,
   "CanUnloadAsync": false,
   "LoadPriority": 0,
-  "Punchline": "S 怪速查：可触发监控 + 一键开图插旗寻路。",
+  "Punchline": "原生窗口与条件倒计时，三大区手动查询公开熊站。",
   "AcceptsFeedback": true
 }

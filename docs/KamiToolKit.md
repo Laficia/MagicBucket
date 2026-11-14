@@ -8,6 +8,8 @@
 
 节点修改、事件注册和释放都在游戏框架线程执行。通过 `AttachNode` / `AddNode` 建立托管和原生所有权，避免重复挂载，不在 `Dispose` 前额外 `DetachNode`。用 `SuppressClosed` 区分主动隐藏与用户关闭，传送时保留原有窗口意图。
 
+`NodeBase.AddEvent(MouseDown/MouseUp/MouseClick)` 会给目标添加阻挡式碰撞标记。原生复选框的右键扩展应注册到它已有的 `CollisionNode`，避免在组件外层新增碰撞目标，导致原生 `ButtonClick` 收不到左键。选中状态只在模型变化时同步，不能反复根据旧快照调用 `SetChecked` 打断手势；原生宽高为整数，应先取整再比较，避免小数尺寸每帧重复写入。
+
 ## 尺寸与文字
 
 `ResponsiveAddon` 为六个窗口提供共享缩放、拖动结束清理和独立尺寸保存。`ScrollingNode<ResNode>` 负责剪裁、滚动；尺寸变化重排现有节点，列宽由 `NativeWindowLayout` 分配，按钮通过 `Flow` 换行。`ThemedTextNode.Fit` 使用原生字形测量，缓存排版结果，过长文本有完整悬停提示。

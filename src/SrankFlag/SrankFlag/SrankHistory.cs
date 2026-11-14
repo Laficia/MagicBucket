@@ -66,7 +66,7 @@ internal sealed class SrankHistory
 		}
 	}
 
-	internal void NoteOpenState(string key, bool openNow, string monster, string server, string map, double eventTime)
+	internal void NoteOpenState(string key, bool openNow, string monster, string server, string map, double eventTime,HistorySource source=HistorySource.MainSite)
 	{
 		if (key.Length == 0)
 		{
@@ -85,7 +85,7 @@ internal sealed class SrankHistory
 					openStates[key] = openNow;
 					if (openNow)
 					{
-						AddLocked(monster, server, map, HistoryEventType.Spawn, HistorySource.MainSite, eventTime);
+						AddLocked(monster, server, map, HistoryEventType.Spawn, source, eventTime);
 					}
 				}
 			}

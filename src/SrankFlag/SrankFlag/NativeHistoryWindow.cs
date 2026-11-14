@@ -94,7 +94,7 @@ internal sealed class NativeHistoryWindow : ResponsiveAddon
 
 	private readonly RowNodes?[] rows = new RowNodes[24];
 
-	private readonly TextButtonNode?[] filterButtons = new TextButtonNode[5];
+	private readonly NativeRadioOption?[] filterButtons = new NativeRadioOption[5];
 
 	private readonly TextNode?[] headers = new TextNode[5];
 
@@ -196,11 +196,11 @@ internal sealed class NativeHistoryWindow : ResponsiveAddon
 			for (int l = 0; l < Filters.Length; l++)
 			{
 				HistoryFilter f = Filters[l].Filter;
-				filterButtons[l] = B(contentStartPosition, 96f, 22f, Filters[l].Label, () =>
+				filterButtons[l] = new NativeRadioOption(() =>
 				{
 					actions.SetFilter(f);
 				});
-				NativeButtonStyle.CompactRadio(filterButtons[l], Filters[l].Label, 22f, on: false);
+				filterButtons[l].AttachNode(fixedRoot);
 			}
 			bPrev = B(contentStartPosition, 96f, 24f, "◀ 上一页", () =>
 			{
@@ -380,7 +380,7 @@ internal sealed class NativeHistoryWindow : ResponsiveAddon
         float w=BodyWidth-12,y=0;fixedRoot.Position=Vector2.Zero;title.Fit(MathF.Max(100,w-250),14);
         if(clearArmed&&(DateTime.UtcNow-clearArmedAtUtc).TotalSeconds>5)clearArmed=false;
         NativeButtonStyle.Apply(bClear,clearArmed?"再点一次确认":"清空历史",150,26,clearArmed);NativeButtonStyle.Apply(bClose,"关闭",80,26,false);y=Flow(w,y,title,bClear,bClose);
-        for(int i=0;i<filterButtons.Length;i++)NativeButtonStyle.CompactRadio(filterButtons[i],Filters[i].Label,22,s.Filter==Filters[i].Filter);
+        for(int i=0;i<filterButtons.Length;i++)filterButtons[i].Apply(Filters[i].Label,s.Filter==Filters[i].Filter,w);
         y=Flow(w,y,filterButtons);
         bPrev.IsVisible=s.Page>0;bNext.IsVisible=s.Page+1<s.PageCount;status.String=s.Status;status.Fit(w,11);y=Flow(w,y,bPrev,bNext,status);
         mapHint.String=s.Rows.Count>0?"最近："+s.Rows[0].MonsterName+" · "+s.Rows[0].MapName:"暂无历史记录";mapHint.Fit(w,11);y=Flow(w,y,mapHint);
@@ -392,7 +392,7 @@ internal sealed class NativeHistoryWindow : ResponsiveAddon
             var record=s.Rows[i];row.Bg.Position=new Vector2(0,y);row.Bg.Size=new Vector2(w,24);
             row.Time.String=FormatTime(record.EventTime);row.Monster.String=record.MonsterName;row.Server.String=record.ServerName;row.Server.TextColor=ServerColors.ForWorld(record.ServerName);
             row.Event.String=record.EventType==HistoryEventType.Kill?"击杀":"出生";row.Event.TextColor=record.EventType==HistoryEventType.Kill?KillRed:SpawnGreen;
-            row.Source.String=record.Source==HistorySource.Sonar?"Sonar":"主站";row.Source.TextColor=record.Source==HistorySource.Sonar?SonarGold:SiteGray;
+            row.Source.String=record.Source switch {HistorySource.Sonar=>"Sonar",HistorySource.Bear=>"熊站",_=>"主站"};row.Source.TextColor=record.Source==HistorySource.Sonar?SonarGold:SiteGray;
             x=0;var texts=new[]{row.Time,row.Monster,row.Server,row.Event,row.Source};
             for(int j=0;j<texts.Length;j++){texts[j].Position=new Vector2(x+3,y+2);texts[j].Fit(widths[j]-6,12);x+=widths[j];}y+=26;
         }

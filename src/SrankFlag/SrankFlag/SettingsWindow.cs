@@ -32,7 +32,7 @@ internal sealed class SettingsWindow : ResponsiveAddon
 
 	private readonly SettingsActions actions;
 
-	private readonly TextButtonNode?[] rows = new TextButtonNode[Rows.Length];
+	private readonly NativeCheckOption?[] rows = new NativeCheckOption[Rows.Length];
 
 	private TextNode? title;
 	private ScrollingNode<ResNode>? scroll;
@@ -75,10 +75,11 @@ internal sealed class SettingsWindow : ResponsiveAddon
 		for (int i = 0; i < Rows.Length; i++)
 		{
 			string key = Rows[i].Key;
-			rows[i] = B(contentStartPosition, 396f, 28f, Rows[i].Label, () =>
+			rows[i] = new NativeCheckOption(() =>
 			{
 				actions.Toggle(key);
 			});
+			rows[i].AttachNode(content);
 		}
 		status = T(contentStartPosition, 396f, 18f, 11u, "");
 		status.TextColor = MutedText;
@@ -126,7 +127,7 @@ internal sealed class SettingsWindow : ResponsiveAddon
         if(content==null||scroll==null||title==null||status==null||hint==null||bRefresh==null||bClose==null)return;
         bool[] values=[s.ShowMain,s.ShowAuto,s.ShowHud,s.ShowConditions,s.AutoSummon,s.AutoLeave,s.ConfirmReturn];
         float w=BodyWidth-12,y=0;title.Fit(w,14);y=Flow(w,y,title);
-        for(int i=0;i<rows.Length;i++){NativeButtonStyle.Fixed(rows[i],Rows[i].Label+(values[i]?" · 开":" · 关"),w,28,Vector4.One,NativeTheme.ButtonText);y=Flow(w,y,rows[i]);}
+        for(int i=0;i<rows.Length;i++){rows[i].Apply(Rows[i].Label,values[i],w,w);y=Flow(w,y,rows[i]);}
         status.String=s.Status;status.Fit(w,11,true);y=Flow(w,y,status);
         NativeButtonStyle.Apply(bRefresh,"立即刷新数据",170,26,false);NativeButtonStyle.Apply(bClose,"关闭",100,26,false);y=Flow(w,y,bRefresh,bClose);
         hint.Fit(w,11,true);y=Flow(w,y,hint);

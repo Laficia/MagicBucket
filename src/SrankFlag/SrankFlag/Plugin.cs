@@ -928,6 +928,9 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 	private DateTime lastBearOk = DateTime.MinValue;
 
 	private bool bearFetching;
+	private CancellationTokenSource? bearRequest;
+	private int bearRequestGeneration;
+	private bool bearNotify;
 
 	private string bearStatus = "尚未拉取";
 
@@ -2906,6 +2909,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		{
 		}
 		cts.Cancel();
+		bearRequest?.Cancel();
 		try
 		{
 			listener?.Stop();
@@ -2930,6 +2934,13 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 		switch (array[0].ToLowerInvariant())
 		{
+		case "dc":
+			if(array.Length==2&&srankData?.dcs.Any(dc=>dc.dc==array[1])==true)SelectDc(array[1]);
+			else Print("用法：/水桶 dc <豆豆柴|莫古力|猫小胖|陆行鸟>");
+			break;
+		case "refresh":
+			MaybeStartBearFetch(force:true,notify:true);
+			break;
 		case "settings":
 			settingsWindowOpen = !settingsWindowOpen;
 			nativeHud?.SetSettingsWindowOpen(settingsWindowOpen);
@@ -6882,11 +6893,10 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				{
 					LoadSrankData();
 				}
-				MaybeStartBearFetch(force: true);
+				MaybeStartBearFetch(force: true,notify:true);
 				MaybeStartPointsFetch(force: true);
 				MaybeRefreshRestart(force: true);
 				nativeHud?.ForceMainRefresh();
-				Print("正在从熊站拉取最新击杀时间、维护 T 和实时排点…");
 			},
 			Closed = () =>
 			{
@@ -7027,11 +7037,10 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				{
 					LoadSrankData();
 				}
-				MaybeStartBearFetch(force: true);
+				MaybeStartBearFetch(force: true,notify:true);
 				MaybeStartPointsFetch(force: true);
 				MaybeRefreshRestart(force: true);
 				nativeHud?.ForceMainRefresh();
-				Print("正在从熊站拉取最新击杀时间、维护 T 和实时排点…");
 			},
 			OpenAuto = () =>
 			{
@@ -8590,11 +8599,18 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		SnapshotData snapshotData = list.FirstOrDefault((SnapshotData x) => x.dc == dc) ?? list[0];
 		if (srankData.data != snapshotData)
 		{
+			if(bearFetching&&bearNotify)Print($"已取消 {currentDc} 的手动刷新（切换大区）。");
+			bearNotify=false;
 			CaptureFilter();
 			srankData.data = snapshotData;
 			currentDc = snapshotData.dc;
 			ApplyFilter(snapshotData.dc, snapshotData);
 			bearStatus = "尚未拉取";
+			bearRequestGeneration++;
+			bearRequest?.Cancel();
+			bearRequest?.Dispose();
+			bearRequest=null;
+			bearFetching=false;
 			lastBearFetch = DateTime.MinValue;
 			try
 			{
@@ -8616,7 +8632,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 	}
 
-	private static async Task<(string hunt, string world, double ts)> BearQueryAsync(string huntEn, string world)
+	private static async Task<(string hunt, string world, double ts)> BearQueryAsync(string huntEn, string world,CancellationToken token=default)
 	{
 		string content = JsonSerializer.Serialize(new
 		{
@@ -8624,26 +8640,16 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			WorldName = world
 		});
 		using StringContent content2 = new StringContent(content, Encoding.UTF8, "application/json");
-		using HttpResponseMessage resp = await BearHttp.Value.PostAsync("https://tracker.beartoolkit.com/api/getHuntInfo", content2).ConfigureAwait(continueOnCapturedContext: false);
+		using HttpResponseMessage resp = await BearHttp.Value.PostAsync(BearApi, content2,token).ConfigureAwait(continueOnCapturedContext: false);
 		resp.EnsureSuccessStatusCode();
-		using JsonDocument jsonDocument = JsonDocument.Parse(await resp.Content.ReadAsStringAsync().ConfigureAwait(continueOnCapturedContext: false));
-		if (jsonDocument.RootElement.ValueKind != JsonValueKind.Array)
-		{
-			return (hunt: huntEn, world: world, ts: 0.0);
-		}
-		double num = 0.0;
-		foreach (JsonElement item in jsonDocument.RootElement.EnumerateArray())
-		{
-			if (item.ValueKind == JsonValueKind.Object && (!item.TryGetProperty("Canceled", out var value) || value.ValueKind != JsonValueKind.True) && item.TryGetProperty("Time", out var value2) && value2.ValueKind == JsonValueKind.Number)
-			{
-				num = Math.Max(num, value2.GetDouble());
-			}
-		}
-		return (hunt: huntEn, world: world, ts: num);
+		using JsonDocument jsonDocument = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(token).ConfigureAwait(false));
+		if(jsonDocument.RootElement.ValueKind!=JsonValueKind.Array)throw new InvalidDataException("公开熊站返回的记录格式无效");
+		return (huntEn,world,BearRefreshPolicy.LatestKill(jsonDocument.RootElement));
 	}
 
 	private void MaybeRefreshRestart(bool force)
 	{
+		if(!BearRefreshPolicy.UsesMainSite(currentDc))return;
 		if (force || !(DateTime.UtcNow - lastRestartFetch <= TimeSpan.FromSeconds(60L)))
 		{
 			lastRestartFetch = DateTime.UtcNow;
@@ -8674,185 +8680,111 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 	}
 
-	private void MaybeStartBearFetch(bool force)
+	private void MaybeStartBearFetch(bool force,bool notify=false)
 	{
-		if (bearFetching)
+		if(bearFetching){if(notify)Print($"{currentDc} 正在刷新，请稍候。");return;}
+		var target=srankData?.data;
+		if(target==null||target.hunts.Length==0||target.worlds.Length==0){if(notify)Print("暂无可刷新的狩猎数据。");return;}
+		string dc=target.dc;
+		if(!BearRefreshPolicy.CanStart(dc,force,DateTime.UtcNow-lastBearFetch)){if(notify)Print("刷新间隔至少 10 秒，请稍后重试。");return;}
+		bool mainSite=BearRefreshPolicy.UsesMainSite(dc);
+		bearRequest?.Dispose();
+		var request=CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+		request.CancelAfter(TimeSpan.FromMinutes(5));
+		bearRequest=request;
+		CancellationToken token=request.Token;
+		int generation=++bearRequestGeneration;
+		bearFetching=true;bearNotify=notify;lastBearFetch=DateTime.UtcNow;
+		bearStatus=mainSite?"主站拉取中…":"公开熊站手动加载中…";
+		if(notify)Print($"开始刷新 {dc} · {(mainSite?"主站":"公开熊站")}，完成后会提示。");
+		log.Information($"[SrankFlag.Bear] 开始加载：{dc} · {(mainSite?"主站":"手动公开熊站")}");
+		var pairs=target.hunts.Select(h=>h.en).Where(en=>!string.IsNullOrWhiteSpace(en)).Distinct()
+			.SelectMany(hunt=>target.worlds.Select(world=>(h:hunt,w:world))).ToList();
+		Task.Run(async()=>
 		{
-			return;
-		}
-		SnapshotData snapshotData = srankData?.data;
-		if (snapshotData == null || snapshotData.hunts.Length == 0 || snapshotData.worlds.Length == 0)
-		{
-			return;
-		}
-		if (!(currentDc == "豆豆柴"))
-		{
-			if (!force || DateTime.UtcNow - lastBearFetch < BearForceFloor)
+			var bag=new ConcurrentDictionary<string,double>(StringComparer.Ordinal);
+			int completed=0,failed=0;
+			string? lastError=null;
+			bool interrupted=false;
+			try
 			{
-				return;
-			}
-			bearFetching = true;
-			lastBearFetch = DateTime.UtcNow;
-			bearStatus = "从公开熊站拉取中…";
-			List<string> source = (from h in snapshotData.hunts
-				select h.en into x
-				where !string.IsNullOrWhiteSpace(x)
-				select x).Distinct().ToList();
-			List<string> worlds = snapshotData.worlds.ToList();
-			List<(string h, string w)> pairs = source.SelectMany((string h) => worlds.Select((string w) => (h: h, w: w))).ToList();
-			Task.Run(async () =>
-			{
-				ConcurrentDictionary<string, double> bag = new ConcurrentDictionary<string, double>(StringComparer.Ordinal);
-				try
+				if(mainSite)
 				{
-					await Parallel.ForEachAsync(pairs, new ParallelOptions
-					{
-						MaxDegreeOfParallelism = 2
-					}, async ((string h, string w) p, CancellationToken _) =>
-					{
-						try
-						{
-							var (text, text2, num) = await BearQueryAsync(p.h, p.w).ConfigureAwait(continueOnCapturedContext: false);
-							if (num > 0.0)
-							{
-								bag[text + "|" + text2] = num;
-							}
-						}
-						catch
-						{
-						}
-					}).ConfigureAwait(continueOnCapturedContext: false);
-				}
-				catch (Exception ex)
-				{
-					log.Warning("[SrankFlag] 公开熊站拉取失败：" + ex.Message);
-				}
-				framework.RunOnTick(() =>
-				{
+					// Only 豆豆柴 may use the main site's aggregation endpoint.
 					try
 					{
-						ApplyBearResult(bag);
-					}
-					catch (Exception ex2)
-					{
-						log.Warning("[SrankFlag] 熊站数据写入失败：" + ex2.Message);
-					}
-					bearFetching = false;
-				});
-			});
-		}
-		else
-		{
-			if ((!force && DateTime.UtcNow - lastBearFetch < BearInterval) || (force && DateTime.UtcNow - lastBearFetch < BearForceFloor))
-			{
-				return;
-			}
-			bearFetching = true;
-			lastBearFetch = DateTime.UtcNow;
-			bearStatus = "拉取中…";
-			List<string> source2 = (from h in snapshotData.hunts
-				select h.en into x
-				where !string.IsNullOrWhiteSpace(x)
-				select x).Distinct().ToList();
-			List<string> worlds2 = snapshotData.worlds.ToList();
-			List<(string h, string w)> pairs2 = source2.SelectMany((string h) => worlds2.Select((string w) => (h: h, w: w))).ToList();
-			string dc = currentDc;
-			Task.Run(async () =>
-			{
-				ConcurrentDictionary<string, double> bag = new ConcurrentDictionary<string, double>(StringComparer.Ordinal);
-				if (dc.Length > 0)
-				{
-					try
-					{
-						using HttpResponseMessage resp = await BearHttp.Value.GetAsync("http://119.29.119.179/api/live?dc=" + Uri.EscapeDataString(dc)).ConfigureAwait(continueOnCapturedContext: false);
-						if (resp.IsSuccessStatusCode)
-						{
-							using JsonDocument jsonDocument = JsonDocument.Parse(await resp.Content.ReadAsStringAsync().ConfigureAwait(continueOnCapturedContext: false));
-							if (jsonDocument.RootElement.TryGetProperty("live", out var value) && value.ValueKind == JsonValueKind.Object)
-							{
-								foreach (JsonProperty item in value.EnumerateObject())
-								{
-									if (item.Value.ValueKind == JsonValueKind.Object)
+						using var response=await BearHttp.Value.GetAsync(LiveApi+Uri.EscapeDataString(dc),token).ConfigureAwait(false);
+						response.EnsureSuccessStatusCode();
+						using var document=JsonDocument.Parse(await response.Content.ReadAsStringAsync(token).ConfigureAwait(false));
+						if(document.RootElement.TryGetProperty("live",out var live)&&live.ValueKind==JsonValueKind.Object)
+							foreach(var world in live.EnumerateObject())
+								if(world.Value.ValueKind==JsonValueKind.Object&&target.worlds.Contains(world.Name))
+									foreach(var hunt in world.Value.EnumerateObject())
 									{
-										foreach (JsonProperty item2 in item.Value.EnumerateObject())
-										{
-											double num = 0.0;
-											if (item2.Value.ValueKind == JsonValueKind.Array)
-											{
-												foreach (JsonElement item3 in item2.Value.EnumerateArray())
-												{
-													if (item3.ValueKind == JsonValueKind.Array && item3.GetArrayLength() >= 2 && (item3.GetArrayLength() < 3 || item3[2].ValueKind != JsonValueKind.True) && item3[1].ValueKind == JsonValueKind.Number)
-													{
-														double num2 = item3[1].GetDouble();
-														if (num2 > num)
-														{
-															num = num2;
-														}
-													}
-												}
-											}
-											if (num > 0.0)
-											{
-												bag[item2.Name + "|" + item.Name] = num;
-											}
-										}
+										double latest=0;
+										if(hunt.Value.ValueKind==JsonValueKind.Array)
+											foreach(var record in hunt.Value.EnumerateArray())
+												if(record.ValueKind==JsonValueKind.Array&&record.GetArrayLength()>=2&&
+												   (record.GetArrayLength()<3||!BearRefreshPolicy.IsCanceled(record[2]))&&record[1].ValueKind==JsonValueKind.Number&&record[1].TryGetDouble(out double timestamp)&&double.IsFinite(timestamp))latest=Math.Max(latest,timestamp);
+										if(latest>0)bag[hunt.Name+"|"+world.Name]=latest;
 									}
-								}
-							}
-						}
 					}
-					catch (Exception ex)
-					{
-						log.Warning("[SrankFlag] 站点 live 拉取失败，退回熊站逐条：" + ex.Message);
-					}
+					catch(OperationCanceledException){throw;}
+					catch(Exception ex){log.Warning("[SrankFlag] 豆豆柴主站拉取失败："+ex.Message);}
+					if(!bag.IsEmpty)return;
+					if(DateTime.UtcNow-lastBearFallback<TimeSpan.FromMinutes(60))return;
+					lastBearFallback=DateTime.UtcNow;
+					pairs=pairs.Take(60).ToList();
 				}
-				if (bag.IsEmpty && DateTime.UtcNow - lastBearFallback > TimeSpan.FromMinutes(60L))
-				{
-					List<(string, string)> source3 = ((pairs2.Count > 60) ? pairs2.GetRange(0, 60) : pairs2);
-					try
-					{
-						await Parallel.ForEachAsync(source3, new ParallelOptions
-						{
-							MaxDegreeOfParallelism = 2
-						}, async ((string h, string w) p, CancellationToken _) =>
-						{
-							try
-							{
-								var (text, text2, num3) = await BearQueryAsync(p.h, p.w).ConfigureAwait(continueOnCapturedContext: false);
-								if (num3 > 0.0)
-								{
-									bag[text + "|" + text2] = num3;
-								}
-							}
-							catch
-							{
-							}
-						}).ConfigureAwait(continueOnCapturedContext: false);
-					}
-					catch (Exception ex2)
-					{
-						log.Warning("[SrankFlag] 熊站拉取失败：" + ex2.Message);
-					}
-					lastBearFallback = DateTime.UtcNow;
-				}
-				framework.RunOnTick(() =>
+				// Other three DCs reach this branch only after an explicit manual refresh.
+				await Parallel.ForEachAsync(pairs,new ParallelOptions{MaxDegreeOfParallelism=2,CancellationToken=token},async(pair,ct)=>
 				{
 					try
 					{
-						ApplyBearResult(bag);
+						var result=await BearQueryAsync(pair.h,pair.w,ct).ConfigureAwait(false);
+						bag[result.hunt+"|"+result.world]=result.ts;
 					}
-					catch (Exception ex3)
+					catch(OperationCanceledException){throw;}
+					catch(Exception ex)
 					{
-						log.Warning("[SrankFlag] 熊站数据写入失败：" + ex3.Message);
+						lastError=ex.Message;
+						if(Interlocked.Increment(ref failed)>=6&&bag.IsEmpty)request.Cancel();
 					}
-					bearFetching = false;
-				});
-			});
-		}
+					int done=Interlocked.Increment(ref completed);
+					if(done%8==0&&!cts.IsCancellationRequested&&!token.IsCancellationRequested)
+						framework.RunOnTick(()=>
+						{
+							if(cts.IsCancellationRequested||generation!=bearRequestGeneration)return;
+							ApplyBearResult(bag,target,!mainSite);
+							bearStatus=$"公开熊站 · {done}/{pairs.Count} · {bag.Values.Count(value=>value>0)} 条记录 · {failed} 次失败";
+							nativeHud?.ForceMainRefresh();
+						});
+				}).ConfigureAwait(false);
+			}
+			catch(OperationCanceledException){interrupted=true;}
+			catch(Exception ex){failed++;log.Warning("[SrankFlag] 熊站加载失败："+ex.Message);}
+			finally
+			{
+				if(!cts.IsCancellationRequested)
+					framework.RunOnTick(()=>
+					{
+						if(cts.IsCancellationRequested||generation!=bearRequestGeneration)return;
+						ApplyBearResult(bag,target,!mainSite);
+						bearFetching=false;
+						bearNotify=false;
+						string origin=mainSite?"主站":"公开熊站";
+						bearStatus=bag.IsEmpty?$"{origin}暂不可用 · 点击刷新重试":$"{origin}已加载 {bag.Values.Count(value=>value>0)} 条记录"+((failed>0||interrupted)?$" · 部分未完成（{failed} 次失败）":"");
+						log.Information($"[SrankFlag.Bear] 加载结束：{dc} · {bag.Count} 条 · {completed}/{pairs.Count} · {failed} 次失败"+(lastError==null?"":" · "+lastError));
+						if(notify)Print(BearRefreshPolicy.CompletionNotice(dc,origin,bag.Values.Count(value=>value>0),bag.Count,failed,interrupted));
+						nativeHud?.ForceMainRefresh();
+					});
+			}
+		});
 	}
 
 	private void MaybeStartPointsFetch(bool force)
 	{
+		if(!BearRefreshPolicy.UsesMainSite(currentDc))return;
 		if (pointsFetching || (!force && DateTime.UtcNow - lastPointsFetch < PointsInterval))
 		{
 			return;
@@ -8903,7 +8835,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 							string text = (item2.TryGetProperty("world", out var value6) ? (value6.GetString() ?? "") : "");
 							string text2 = (item2.TryGetProperty("hunt", out var value7) ? (value7.GetString() ?? "") : "");
 							int num = ((!item2.TryGetProperty("line", out var value8) || value8.ValueKind != JsonValueKind.Number) ? 1 : value8.GetInt32());
-							if (text.Length != 0 && text2.Length != 0)
+							if (MainSiteWorld(text) && text2.Length != 0)
 							{
 								Dictionary<int, char> dictionary = new Dictionary<int, char>();
 								if (item2.TryGetProperty("points", out var value9) && value9.ValueKind == JsonValueKind.Object)
@@ -9069,101 +9001,9 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 	}
 
-	private void SaveBearCache()
+	private void ApplyBearResult(ConcurrentDictionary<string, double> map, SnapshotData? target=null,bool authoritative=false)
 	{
-		try
-		{
-			SnapshotData snapshotData = srankData?.data;
-			if (snapshotData == null)
-			{
-				return;
-			}
-			Dictionary<string, double> dictionary = new Dictionary<string, double>(StringComparer.Ordinal);
-			HuntData[] hunts = snapshotData.hunts;
-			foreach (HuntData huntData in hunts)
-			{
-				WorldDeath[] worlds = huntData.worlds;
-				foreach (WorldDeath worldDeath in worlds)
-				{
-					if (worldDeath.lastDeath > 0.0)
-					{
-						dictionary[huntData.en + "|" + worldDeath.world] = worldDeath.lastDeath;
-					}
-				}
-			}
-			var value = new
-			{
-				snapshot = snapshotData.snapshot,
-				kills = dictionary
-			};
-			File.WriteAllText(BearCachePath, JsonSerializer.Serialize(value));
-		}
-		catch (Exception ex)
-		{
-			log.Warning("[SrankFlag] 写缓存失败：" + ex.Message);
-		}
-	}
-
-	private void MergeBearCache()
-	{
-		try
-		{
-			SnapshotData snapshotData = srankData?.data;
-			if (snapshotData == null || !File.Exists(BearCachePath))
-			{
-				return;
-			}
-			using JsonDocument jsonDocument = JsonDocument.Parse(File.ReadAllText(BearCachePath));
-			if (!jsonDocument.RootElement.TryGetProperty("kills", out var value))
-			{
-				return;
-			}
-			ConcurrentDictionary<string, double> concurrentDictionary = new ConcurrentDictionary<string, double>(StringComparer.Ordinal);
-			foreach (JsonProperty item in value.EnumerateObject())
-			{
-				if (item.Value.ValueKind == JsonValueKind.Number)
-				{
-					concurrentDictionary[item.Name] = item.Value.GetDouble();
-				}
-			}
-			if (jsonDocument.RootElement.TryGetProperty("snapshot", out var value2) && value2.ValueKind == JsonValueKind.Number)
-			{
-				snapshotData.snapshot = Math.Max(snapshotData.snapshot, value2.GetDouble());
-			}
-			HuntData[] hunts = snapshotData.hunts;
-			foreach (HuntData huntData in hunts)
-			{
-				WorldDeath[] worlds = huntData.worlds;
-				foreach (WorldDeath worldDeath in worlds)
-				{
-					if (concurrentDictionary.TryGetValue(huntData.en + "|" + worldDeath.world, out var value3) && value3 > worldDeath.lastDeath)
-					{
-						worldDeath.lastDeath = value3;
-					}
-				}
-			}
-			hunts = snapshotData.hunts;
-			foreach (HuntData huntData2 in hunts)
-			{
-				if (huntData2.worlds.Length != 0)
-				{
-					double num = huntData2.worlds.Max((WorldDeath x) => x.lastDeath);
-					if (num > huntData2.lastDeath)
-					{
-						huntData2.lastDeath = num;
-					}
-				}
-			}
-		}
-		catch (Exception ex)
-		{
-			log.Warning("[SrankFlag] 读缓存失败：" + ex.Message);
-		}
-	}
-
-	private void ApplyBearResult(ConcurrentDictionary<string, double> map)
-	{
-		SnapshotData snapshotData = srankData?.data;
+		SnapshotData snapshotData = target??srankData?.data;
 		if (snapshotData == null)
 		{
 			return;
@@ -9182,36 +9022,41 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			WorldDeath[] worlds = huntData.worlds;
 			foreach (WorldDeath worldDeath in worlds)
 			{
-				if (map.TryGetValue(huntData.en + "|" + worldDeath.world, out var value) && !(value <= 0.0))
+				if (map.TryGetValue(huntData.en + "|" + worldDeath.world, out var value) && double.IsFinite(value)&&value>=0)
 				{
 					num++;
-					if (value > worldDeath.lastDeath)
+					sonarKills.TryGetValue(snapshotData.dc+"|"+huntData.en+"|"+worldDeath.world,out double sonar);
+					value=BearRefreshPolicy.ResolveDeath(worldDeath.lastDeath,value,sonar,authoritative);
+					if (value != worldDeath.lastDeath)
 					{
+						bool newer=value>worldDeath.lastDeath;
 						worldDeath.lastDeath = value;
 						flag = true;
-						history?.Add(huntData.cn, worldDeath.world, huntData.map, HistoryEventType.Kill, HistorySource.MainSite, value);
-						ClearTriggered(huntData.en, worldDeath.world, "主站击杀时间更新", value);
-						hashSet.Add(TrigKey(huntData.en, worldDeath.world));
+						if(newer&&value>0)
+						{
+							history?.Add(huntData.cn,worldDeath.world,huntData.map,HistoryEventType.Kill,BearRefreshPolicy.UsesMainSite(snapshotData.dc)?HistorySource.MainSite:HistorySource.Bear,value);
+							ClearTriggered(huntData.en,worldDeath.world,"击杀时间更新",value);
+							hashSet.Add(TrigKey(huntData.en,worldDeath.world));
+						}
 					}
 				}
 			}
 			if (flag)
 			{
 				double num3 = huntData.worlds.Max((WorldDeath x) => x.lastDeath);
-				if (num3 > huntData.lastDeath)
+				if (authoritative||num3 > huntData.lastDeath)
 				{
 					huntData.lastDeath = num3;
 				}
 				num2++;
 			}
 		}
-		snapshotData.snapshot = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-		lastBearOk = DateTime.UtcNow;
+		if(num>0){snapshotData.snapshot = DateTimeOffset.UtcNow.ToUnixTimeSeconds();lastBearOk = DateTime.UtcNow;}
 		SaveBearCache();
-		bearStatus = ((num == 0) ? $"拉取失败 · {DateTime.Now:HH:mm}" : $"已同步 {num2} 只 · {DateTime.Now:HH:mm}");
+		if(ReferenceEquals(snapshotData,srankData?.data))bearStatus = ((num == 0) ? $"暂未获取有效记录 · {DateTime.Now:HH:mm}" : $"已同步 {num} 条 · {DateTime.Now:HH:mm}");
 		NoteMainSiteOpenStates(snapshotData);
 		SweepTriggeredByDeath();
-		ApplyRelayTriggered(hashSet);
+		if(BearRefreshPolicy.UsesMainSite(snapshotData.dc))ApplyRelayTriggered(hashSet);
 		nativeHud?.ForceHistoryRefresh();
 	}
 
@@ -9257,7 +9102,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 					double winH = ((num3 != 0 && huntData.mt.Length >= 2) ? huntData.mt[1] : huntData.win);
 					string item = Calc(num2, num, num5, winH).State;
 					double eventTime = num2 + ((num5 > 0.0) ? num5 : 84.0) * 3600.0;
-					history.NoteOpenState(currentDc + "|" + huntData.en + "|" + worldDeath.world, item == "open", huntData.cn, worldDeath.world, huntData.map, eventTime);
+					history.NoteOpenState(d.dc + "|" + huntData.en + "|" + worldDeath.world, item == "open", huntData.cn, worldDeath.world, huntData.map, eventTime,BearRefreshPolicy.UsesMainSite(d.dc)?HistorySource.MainSite:HistorySource.Bear);
 				}
 			}
 		}
@@ -9631,9 +9476,8 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			{
 				LoadSrankData();
 			}
-			MaybeStartBearFetch(force: true);
+			MaybeStartBearFetch(force: true,notify:true);
 			MaybeStartPointsFetch(force: true);
-			Print("正在从熊站拉取最新击杀时间和实时排点…");
 		}
 		if (ImGui.IsItemHovered())
 		{
@@ -11753,7 +11597,9 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			return false;
 		}
 		LoadTriggered();
-		return triggeredMonsters.ContainsKey(TrigKey(en, world));
+		string key=TrigKey(en,world);
+		if(!MainSiteWorld(world)&&triggeredSource.TryGetValue(key,out var source)&&IsMainSide(source))return false;
+		return triggeredMonsters.ContainsKey(key);
 	}
 
 	private bool MarkTriggered(string en, string world, double deathFloor, double at, string reason, string source = "relay")
@@ -11903,6 +11749,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private void MaybeFetchRelay(bool force)
 	{
+		if(!BearRefreshPolicy.UsesMainSite(currentDc))return;
 		if (!relayFetching && (force || !(DateTime.UtcNow - lastRelayFetch < RelayInterval)))
 		{
 			relayFetching = true;
@@ -11937,7 +11784,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			int total = 0;
 			foreach (JsonProperty item in value.EnumerateObject())
 			{
-				if (item.Value.ValueKind != JsonValueKind.Object)
+				if (!MainSiteWorld(item.Name) || item.Value.ValueKind != JsonValueKind.Object)
 				{
 					continue;
 				}
@@ -11989,30 +11836,9 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 	}
 
-	private double DeathOf(string en, string world)
-	{
-		SnapshotData snapshotData = srankData?.data;
-		if (snapshotData != null)
-		{
-			HuntData[] hunts = snapshotData.hunts;
-			foreach (HuntData huntData in hunts)
-			{
-				if (!string.Equals(huntData.en, en, StringComparison.Ordinal))
-				{
-					continue;
-				}
-				WorldDeath[] worlds = huntData.worlds;
-				foreach (WorldDeath worldDeath in worlds)
-				{
-					if (string.Equals(worldDeath.world, world, StringComparison.Ordinal))
-					{
-						return worldDeath.lastDeath;
-					}
-				}
-			}
-		}
-		return 0.0;
-	}
+	private double DeathOf(string en,string world)=>AllSnapshots().SelectMany(dc=>dc.hunts)
+		.Where(hunt=>string.Equals(hunt.en,en,StringComparison.Ordinal)).SelectMany(hunt=>hunt.worlds)
+		.Where(death=>string.Equals(death.world,world,StringComparison.Ordinal)).Select(death=>death.lastDeath).DefaultIfEmpty(0).Max();
 
 	private void ApplyRelayTriggered(HashSet<string>? justDied)
 	{
@@ -12033,6 +11859,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			foreach (KeyValuePair<string, Dictionary<string, double[]>> item in relayLive)
 			{
 				string key = item.Key;
+				if(!MainSiteWorld(key))continue;
 				foreach (KeyValuePair<string, double[]> item2 in item.Value)
 				{
 					double[] value = item2.Value;

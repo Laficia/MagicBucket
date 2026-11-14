@@ -122,6 +122,28 @@ finally
 }
 Console.WriteLine("PASS: compact defaults, all-hunt selection and subscription persistence.");
 
+foreach(string dc in new[]{"莫古力","猫小胖","陆行鸟"})
+{
+    Check(!BearRefreshPolicy.UsesMainSite(dc),"Other DC selected the main-site source");
+    Check(!BearRefreshPolicy.CanStart(dc,false,TimeSpan.FromDays(100)),"Other DC started automatic loading");
+    Check(BearRefreshPolicy.CanStart(dc,true,TimeSpan.FromSeconds(10)),"Explicit manual loading was refused");
+    Check(!BearRefreshPolicy.CanStart(dc,true,TimeSpan.FromSeconds(9)),"Manual refresh throttle was lost");
+}
+Check(BearRefreshPolicy.UsesMainSite("豆豆柴")&&BearRefreshPolicy.CanStart("豆豆柴",false,TimeSpan.FromMinutes(15)),"Automatic main-site loading changed for 豆豆柴");
+using(var history=JsonDocument.Parse("[{\"Time\":50},{\"Time\":200,\"Canceled\":true},{\"Time\":300,\"Canceled\":1},{\"Time\":100,\"Canceled\":0},{\"Time\":\"999\"}]"))
+    Check(BearRefreshPolicy.LatestKill(history.RootElement)==100,"Canceled or invalid bear records changed the last kill");
+Check(BearRefreshPolicy.ResolveDeath(200,100,0,true)==100,"Manual bear loading must correct a canceled newer record");
+Check(BearRefreshPolicy.ResolveDeath(200,100,250,true)==250,"Manual bear loading overwrote a newer Sonar kill");
+Check(BearRefreshPolicy.ResolveDeath(200,0,0,true)==0,"Unknown authoritative history retained a stale kill");
+Check(BearRefreshPolicy.ResolveDeath(200,100,0,false)==200,"Non-authoritative updates replaced a newer kill");
+Check(BearRefreshPolicy.CompletionNotice("莫古力","公开熊站",350,376,0,false).StartsWith("刷新完成：莫古力"),"A completed manual refresh lost its notice");
+Check(BearRefreshPolicy.CompletionNotice("猫小胖","公开熊站",0,329,0,false).StartsWith("刷新完成"),"An empty valid history must not be reported as network failure");
+Check(BearRefreshPolicy.CompletionNotice("陆行鸟","公开熊站",20,24,3,false).Contains("刷新部分完成")&&BearRefreshPolicy.CompletionNotice("陆行鸟","公开熊站",20,24,3,false).Contains("3 次请求失败"),"A partial result was reported as complete");
+Check(BearRefreshPolicy.CompletionNotice("莫古力","公开熊站",0,0,6,true).StartsWith("刷新失败"),"An unavailable service was reported as complete");
+Check(BearRefreshPolicy.CompletionNotice("莫古力","公开熊站",12,16,0,true).Contains("超时或中止"),"An interrupted manual refresh lost its warning");
+Console.WriteLine("PASS: three DCs require manual bear loading, main-site routing is restricted, and canceled records are ignored.");
+Console.WriteLine("PASS: manual refresh notices distinguish complete, empty, partial, interrupted and failed results.");
+
 void Check(bool condition, string message)
 {
     checks++;
