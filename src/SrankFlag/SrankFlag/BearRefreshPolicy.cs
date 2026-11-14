@@ -10,6 +10,22 @@ internal static class BearRefreshPolicy
         => (manual||UsesMainSite(dc))&&sinceLastFetch>=(manual?TimeSpan.FromSeconds(10):TimeSpan.FromMinutes(15));
     internal static bool IsCanceled(JsonElement value)=>value.ValueKind==JsonValueKind.True||
         (value.ValueKind==JsonValueKind.Number&&value.TryGetDouble(out double number)&&number!=0);
+    internal static (double Timestamp,bool Maintenance) MainSiteLatest(JsonElement rows)
+    {
+        double latest=0;bool maintenance=false;
+        if(rows.ValueKind!=JsonValueKind.Array)return (0,false);
+        foreach(var row in rows.EnumerateArray())
+        {
+            if(row.ValueKind!=JsonValueKind.Array||row.GetArrayLength()<2||row[1].ValueKind!=JsonValueKind.Number||
+               !row[1].TryGetDouble(out double timestamp)||!double.IsFinite(timestamp)||timestamp<=0)continue;
+            // /api/live tuples are [line, timestamp, isMaint]. The third value
+            // is not the public Bear API's Canceled field.
+            bool isMaint=row.GetArrayLength()>2&&row[2].ValueKind==JsonValueKind.True;
+            if(timestamp>latest){latest=timestamp;maintenance=isMaint;}
+            else if(timestamp==latest)maintenance|=isMaint;
+        }
+        return (latest,maintenance);
+    }
     internal static string CompletionNotice(string dc,string origin,int records,int responses,int failures,bool interrupted)
     {
         string outcome=responses==0?"刷新失败":failures>0||interrupted?"刷新部分完成":"刷新完成";

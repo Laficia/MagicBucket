@@ -100,6 +100,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		public string world { get; set; } = "";
 
 		public double lastDeath { get; set; }
+		public bool isMaint { get; set; }
 	}
 
 	private sealed class PointSet
@@ -1072,9 +1073,9 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		double lastDeath2 = Math.Max(lastDeath, restartAt);
 		int num;
 		double num2;
-		if (restartAt > 0.0)
+		if (restartAt > 0.0||h.worlds.Any(w=>w.isMaint&&w.lastDeath==lastDeath))
 		{
-			num = ((restartAt > lastDeath) ? 1 : 0);
+			num = ((restartAt >= lastDeath||h.worlds.Any(w=>w.isMaint&&w.lastDeath==lastDeath)) ? 1 : 0);
 			if (num != 0 && h.mt.Length >= 1)
 			{
 				num2 = h.mt[0];
@@ -7259,9 +7260,9 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				double lastDeath = Math.Max(worldDeath.lastDeath, restartAt);
 				int num5;
 				double num6;
-				if (restartAt > 0.0)
+				if (restartAt > 0.0||worldDeath.isMaint)
 				{
-					num5 = ((restartAt > worldDeath.lastDeath) ? 1 : 0);
+					num5 = ((restartAt >= worldDeath.lastDeath||worldDeath.isMaint) ? 1 : 0);
 					if (num5 != 0 && huntData.mt.Length >= 1)
 					{
 						num6 = huntData.mt[0];
@@ -8703,6 +8704,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		Task.Run(async()=>
 		{
 			var bag=new ConcurrentDictionary<string,double>(StringComparer.Ordinal);
+			var maintenance=new ConcurrentDictionary<string,double>(StringComparer.Ordinal);
 			int completed=0,failed=0;
 			string? lastError=null;
 			bool interrupted=false;
@@ -8721,12 +8723,13 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 								if(world.Value.ValueKind==JsonValueKind.Object&&target.worlds.Contains(world.Name))
 									foreach(var hunt in world.Value.EnumerateObject())
 									{
-										double latest=0;
-										if(hunt.Value.ValueKind==JsonValueKind.Array)
-											foreach(var record in hunt.Value.EnumerateArray())
-												if(record.ValueKind==JsonValueKind.Array&&record.GetArrayLength()>=2&&
-												   (record.GetArrayLength()<3||!BearRefreshPolicy.IsCanceled(record[2]))&&record[1].ValueKind==JsonValueKind.Number&&record[1].TryGetDouble(out double timestamp)&&double.IsFinite(timestamp))latest=Math.Max(latest,timestamp);
-										if(latest>0)bag[hunt.Name+"|"+world.Name]=latest;
+										var latest=BearRefreshPolicy.MainSiteLatest(hunt.Value);
+										if(latest.Timestamp>0)
+										{
+											string key=hunt.Name+"|"+world.Name;
+											bag[key]=latest.Timestamp;
+											if(latest.Maintenance)maintenance[key]=latest.Timestamp;
+										}
 									}
 					}
 					catch(OperationCanceledException){throw;}
@@ -8755,7 +8758,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						framework.RunOnTick(()=>
 						{
 							if(cts.IsCancellationRequested||generation!=bearRequestGeneration)return;
-							ApplyBearResult(bag,target,!mainSite);
+							ApplyBearResult(bag,target,true,maintenance);
 							bearStatus=$"公开熊站 · {done}/{pairs.Count} · {bag.Values.Count(value=>value>0)} 条记录 · {failed} 次失败";
 							nativeHud?.ForceMainRefresh();
 						});
@@ -8769,7 +8772,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 					framework.RunOnTick(()=>
 					{
 						if(cts.IsCancellationRequested||generation!=bearRequestGeneration)return;
-						ApplyBearResult(bag,target,!mainSite);
+						ApplyBearResult(bag,target,true,maintenance);
 						bearFetching=false;
 						bearNotify=false;
 						string origin=mainSite?"主站":"公开熊站";
@@ -9001,7 +9004,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 	}
 
-	private void ApplyBearResult(ConcurrentDictionary<string, double> map, SnapshotData? target=null,bool authoritative=false)
+	private void ApplyBearResult(ConcurrentDictionary<string, double> map, SnapshotData? target=null,bool authoritative=false,IReadOnlyDictionary<string,double>? maintenance=null)
 	{
 		SnapshotData snapshotData = target??srankData?.data;
 		if (snapshotData == null)
@@ -9025,8 +9028,10 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				if (map.TryGetValue(huntData.en + "|" + worldDeath.world, out var value) && double.IsFinite(value)&&value>=0)
 				{
 					num++;
+					double reported=value;
 					sonarKills.TryGetValue(snapshotData.dc+"|"+huntData.en+"|"+worldDeath.world,out double sonar);
 					value=BearRefreshPolicy.ResolveDeath(worldDeath.lastDeath,value,sonar,authoritative);
+					if(authoritative||value==reported)worldDeath.isMaint=value==reported&&maintenance is not null&&maintenance.TryGetValue(huntData.en+"|"+worldDeath.world,out double maintTime)&&maintTime==value;
 					if (value != worldDeath.lastDeath)
 					{
 						bool newer=value>worldDeath.lastDeath;
@@ -9034,7 +9039,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						flag = true;
 						if(newer&&value>0)
 						{
-							history?.Add(huntData.cn,worldDeath.world,huntData.map,HistoryEventType.Kill,BearRefreshPolicy.UsesMainSite(snapshotData.dc)?HistorySource.MainSite:HistorySource.Bear,value);
+							if(!worldDeath.isMaint)history?.Add(huntData.cn,worldDeath.world,huntData.map,HistoryEventType.Kill,BearRefreshPolicy.UsesMainSite(snapshotData.dc)?HistorySource.MainSite:HistorySource.Bear,value);
 							ClearTriggered(huntData.en,worldDeath.world,"击杀时间更新",value);
 							hashSet.Add(TrigKey(huntData.en,worldDeath.world));
 						}
@@ -9082,9 +9087,9 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 					double num2 = Math.Max(worldDeath.lastDeath, restartAt);
 					int num3;
 					double num4;
-					if (restartAt > 0.0)
+					if (restartAt > 0.0||worldDeath.isMaint)
 					{
-						num3 = ((restartAt > worldDeath.lastDeath) ? 1 : 0);
+						num3 = ((restartAt >= worldDeath.lastDeath||worldDeath.isMaint) ? 1 : 0);
 						if (num3 != 0 && huntData.mt.Length >= 1)
 						{
 							num4 = huntData.mt[0];
@@ -9120,24 +9125,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private static (string State, double Eta, double Pct) Calc(double lastDeath, double now, double cdH = 0.0, double winH = 0.0)
 	{
-		if (lastDeath <= 0.0)
-		{
-			return (State: "unknown", Eta: 0.0, Pct: 0.0);
-		}
-		double num = ((cdH > 0.0) ? cdH : 84.0);
-		double num2 = ((winH > 0.0) ? winH : 48.0);
-		double num3 = lastDeath + num * 3600.0;
-		double num4 = num3 + num2 * 3600.0;
-		if (now < num3)
-		{
-			return (State: "cd", Eta: num3 - now, Pct: 0.0);
-		}
-		if (now >= num4)
-		{
-			return (State: "over", Eta: now - num4, Pct: 100.0);
-		}
-		double item = Math.Clamp((now - num3) / (num2 * 3600.0) * 100.0, 0.0, 100.0);
-		return (State: "open", Eta: num4 - now, Pct: item);
+		return HuntWindowDisplay.Calculate(lastDeath,now,cdH,winH);
 	}
 
 	private static string Dur(double sec)
@@ -9573,9 +9561,9 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 					double lastDeath = Math.Max(worldDeath.lastDeath, restartAt);
 					int num57;
 					double num58;
-					if (restartAt > 0.0)
+					if (restartAt > 0.0||worldDeath.isMaint)
 					{
-						num57 = ((restartAt > worldDeath.lastDeath) ? 1 : 0);
+						num57 = ((restartAt >= worldDeath.lastDeath||worldDeath.isMaint) ? 1 : 0);
 						if (num57 != 0 && h.mt.Length >= 1)
 						{
 							num58 = h.mt[0];
@@ -11237,6 +11225,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 					double seenAt = hit.SeenAt;
 					double num = ((lastDeath > 0.0) ? Calc(lastDeath, seenAt, huntData.cd, huntData.win).Pct : 0.0);
 					worldDeath.lastDeath = seenAt;
+					worldDeath.isMaint = false;
 					double item = Calc(seenAt, seenAt, huntData.cd, huntData.win).Pct;
 					if (huntData.worlds.Length != 0)
 					{
@@ -11372,6 +11361,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						if (sonarKills.TryGetValue(key, out var value) && value > worldDeath.lastDeath)
 						{
 							worldDeath.lastDeath = value;
+							worldDeath.isMaint = false;
 							flag = true;
 						}
 					}

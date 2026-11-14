@@ -59,9 +59,14 @@ foreach (var theme in themes)
 Console.WriteLine($"PASS: {checks} checks across {themes.Length} native color-table variants; minimum reference-surface contrast {minimum:F2}:1.");
 
 string[] states = ["open", "cd", "over", "unknown"];
-Check(states.Where(s => HuntWindowDisplay.Includes(s, true)).SequenceEqual(["open"]), "Checked filter leaked a closed/unknown hunt");
+Check(states.Where(s => HuntWindowDisplay.Includes(s, true)).SequenceEqual(["open","over"]), "Checked filter dropped a hunt that reached maximum respawn time");
 Check(states.Where(s => HuntWindowDisplay.Includes(s, false)).SequenceEqual(["cd"]), "Unchecked filter leaked an open/expired hunt");
-Check(!new[] { "cd", "over" }.Any(s => HuntWindowDisplay.Includes(s, true)), "Zero open hunts must produce an empty list");
+Check(!new[] { "cd", "unknown" }.Any(s => HuntWindowDisplay.Includes(s, true)), "Zero open hunts must produce an empty list");
+Check(HuntWindowDisplay.Calculate(1000,1000+42*3600-1,42,6).State=="cd","Gate opened before minimum cooldown");
+Check(HuntWindowDisplay.Calculate(1000,1000+42*3600,42,6)==("open",6*3600,0),"Gate did not open at minimum cooldown");
+Check(HuntWindowDisplay.Calculate(1000,1000+48*3600,42,6)==("open",0,100),"Maximum respawn time hid an open hunt");
+Check(HuntWindowDisplay.Calculate(1000,1000+200*3600,42,6)==("open",0,100),"A 100% hunt vanished without a new kill");
+Check(HuntWindowDisplay.Calculate(1000,1000+42*3600,42,0)==("open",0,100),"Zero-width respawn window did not reach 100%");
 Check(HuntWindowDisplay.Countdown(0) == "00:00:00", "Zero countdown");
 Check(HuntWindowDisplay.Countdown(.1) == "00:00:01", "Countdown announced an opening early");
 Check(HuntWindowDisplay.Countdown(90061) == "25:01:01", "Multi-day countdown lost total hours");
@@ -75,6 +80,18 @@ foreach (float width in new[] { 384f, 564f, 764f, 1164f, 1964f })
     Check(Math.Abs(NativeWindowLayout.HistoryColumns(width).Sum()-width)<.01f, "History columns exceed resized window");
 }
 Console.WriteLine("PASS: strict open/closed filters, countdown boundaries and resized column bounds.");
+using(var referenceTimers=JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"ddb-timer-reference.json"))))
+{
+    var cases=referenceTimers.RootElement.GetProperty("Cases");
+    Check(cases.GetArrayLength()==235,"Five-world reference lost some S ranks");
+    foreach(var item in cases.EnumerateArray())
+    {
+        var actual=HuntWindowDisplay.Calculate(item.GetProperty("Death").GetDouble(),item.GetProperty("Now").GetDouble(),item.GetProperty("Cd").GetDouble(),item.GetProperty("Win").GetDouble());
+        string expected=item.GetProperty("Expected").GetString()=="cold"?"cd":"open";
+        Check(actual.State==expected&&Math.Abs(actual.Pct-item.GetProperty("Percent").GetDouble())<.00001,$"Website timer differs for {item.GetProperty("World").GetString()}/{item.GetProperty("Hunt").GetString()}");
+    }
+}
+Console.WriteLine("PASS: all 235 豆豆柴 timers match the independent website engine, including maintenance and 100% gates.");
 
 var reference = JsonSerializer.Deserialize<List<ForecastReference>>(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"site-forecast-reference.json")))!;
 foreach (var sample in reference)
@@ -132,6 +149,10 @@ foreach(string dc in new[]{"莫古力","猫小胖","陆行鸟"})
 Check(BearRefreshPolicy.UsesMainSite("豆豆柴")&&BearRefreshPolicy.CanStart("豆豆柴",false,TimeSpan.FromMinutes(15)),"Automatic main-site loading changed for 豆豆柴");
 using(var history=JsonDocument.Parse("[{\"Time\":50},{\"Time\":200,\"Canceled\":true},{\"Time\":300,\"Canceled\":1},{\"Time\":100,\"Canceled\":0},{\"Time\":\"999\"}]"))
     Check(BearRefreshPolicy.LatestKill(history.RootElement)==100,"Canceled or invalid bear records changed the last kill");
+using(var live=JsonDocument.Parse("[[1,100,true],[1,90,false]]"))
+    Check(BearRefreshPolicy.MainSiteLatest(live.RootElement)==(100,true),"Main-site maintenance was mistaken for a canceled kill");
+using(var live=JsonDocument.Parse("[[1,100,true],[1,200,false]]"))
+    Check(BearRefreshPolicy.MainSiteLatest(live.RootElement)==(200,false),"A newer kill retained maintenance timing");
 Check(BearRefreshPolicy.ResolveDeath(200,100,0,true)==100,"Manual bear loading must correct a canceled newer record");
 Check(BearRefreshPolicy.ResolveDeath(200,100,250,true)==250,"Manual bear loading overwrote a newer Sonar kill");
 Check(BearRefreshPolicy.ResolveDeath(200,0,0,true)==0,"Unknown authoritative history retained a stale kill");

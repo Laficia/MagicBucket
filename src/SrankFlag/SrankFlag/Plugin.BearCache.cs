@@ -17,14 +17,19 @@ public sealed partial class Plugin
         {
             var kills=new Dictionary<string,double>(StringComparer.Ordinal);
             var snapshots=new Dictionary<string,double>(StringComparer.Ordinal);
+            var maintenance=new Dictionary<string,double>(StringComparer.Ordinal);
             foreach(var dc in AllSnapshots())
             {
                 snapshots[dc.dc]=dc.snapshot;
                 foreach(var hunt in dc.hunts)
                     foreach(var world in hunt.worlds)
-                        if(double.IsFinite(world.lastDeath)&&world.lastDeath>=0)kills[hunt.en+"|"+world.world]=world.lastDeath;
+                        if(double.IsFinite(world.lastDeath)&&world.lastDeath>=0)
+                        {
+                            string key=hunt.en+"|"+world.world;kills[key]=world.lastDeath;
+                            if(world.isMaint)maintenance[key]=world.lastDeath;
+                        }
             }
-            File.WriteAllText(BearCachePath,JsonSerializer.Serialize(new{version=2,snapshots,kills}));
+            File.WriteAllText(BearCachePath,JsonSerializer.Serialize(new{version=3,snapshots,kills,maintenance}));
         }
         catch(Exception ex){log.Warning("[SrankFlag] 写缓存失败："+ex.Message);}
     }
@@ -45,7 +50,11 @@ public sealed partial class Plugin
                 {
                     foreach(var world in hunt.worlds)
                         if(kills.TryGetProperty(hunt.en+"|"+world.world,out var time)&&time.ValueKind==JsonValueKind.Number&&time.TryGetDouble(out double timestamp)&&double.IsFinite(timestamp)&&timestamp>=0)
-                        {world.lastDeath=BearRefreshPolicy.ResolveDeath(world.lastDeath,timestamp,0,authoritative);matched=true;}
+                        {
+                            world.lastDeath=BearRefreshPolicy.ResolveDeath(world.lastDeath,timestamp,0,authoritative);matched=true;
+                            world.isMaint=root.TryGetProperty("maintenance",out var maintenance)&&maintenance.ValueKind==JsonValueKind.Object&&
+                                maintenance.TryGetProperty(hunt.en+"|"+world.world,out var maintTime)&&maintTime.TryGetDouble(out double maintenanceAt)&&maintenanceAt==world.lastDeath;
+                        }
                     if(hunt.worlds.Length>0)hunt.lastDeath=authoritative?hunt.worlds.Max(world=>world.lastDeath):Math.Max(hunt.lastDeath,hunt.worlds.Max(world=>world.lastDeath));
                 }
                 if(!matched)continue;

@@ -16,6 +16,7 @@
     <Compile Include="../../src/SrankFlag/SrankFlag/BearRefreshPolicy.cs" Link="BearRefreshPolicy.cs" />
     <EmbeddedResource Include="../../assets/hunt_conditions.json" LogicalName="SrankFlag.HuntConditions.json" />
     <None Update="site-forecast-reference.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="ddb-timer-reference.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../assets/srank_data.json" Link="srank_data.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
