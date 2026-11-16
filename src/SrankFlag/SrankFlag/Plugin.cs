@@ -921,6 +921,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Referer", "https://tracker.beartoolkit.com/srank");
 		return httpClient;
 	});
+	private readonly Lazy<BearBulkClient> bearBulk = new(() => new());
 
 	private DateTime lastBearFetch = DateTime.MinValue;
 
@@ -2910,6 +2911,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		{
 		}
 		cts.Cancel();
+		if(bearBulk.IsValueCreated)bearBulk.Value.Dispose();
 		bearRequest?.Cancel();
 		try
 		{
@@ -8635,15 +8637,17 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private static async Task<(string hunt, string world, double ts)> BearQueryAsync(string huntEn, string world,CancellationToken token=default)
 	{
+		using var timeout=CancellationTokenSource.CreateLinkedTokenSource(token);
+		timeout.CancelAfter(TimeSpan.FromSeconds(8));
 		string content = JsonSerializer.Serialize(new
 		{
 			HuntName = huntEn,
 			WorldName = world
 		});
 		using StringContent content2 = new StringContent(content, Encoding.UTF8, "application/json");
-		using HttpResponseMessage resp = await BearHttp.Value.PostAsync(BearApi, content2,token).ConfigureAwait(continueOnCapturedContext: false);
+		using HttpResponseMessage resp = await BearHttp.Value.PostAsync(BearApi, content2,timeout.Token).ConfigureAwait(continueOnCapturedContext: false);
 		resp.EnsureSuccessStatusCode();
-		using JsonDocument jsonDocument = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(token).ConfigureAwait(false));
+		using JsonDocument jsonDocument = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));
 		if(jsonDocument.RootElement.ValueKind!=JsonValueKind.Array)throw new InvalidDataException("公开熊站返回的记录格式无效");
 		return (huntEn,world,BearRefreshPolicy.LatestKill(jsonDocument.RootElement));
 	}
@@ -8701,15 +8705,43 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		log.Information($"[SrankFlag.Bear] 开始加载：{dc} · {(mainSite?"主站":"手动公开熊站")}");
 		var pairs=target.hunts.Select(h=>h.en).Where(en=>!string.IsNullOrWhiteSpace(en)).Distinct()
 			.SelectMany(hunt=>target.worlds.Select(world=>(h:hunt,w:world))).ToList();
+		var elapsed=System.Diagnostics.Stopwatch.StartNew();
 		Task.Run(async()=>
 		{
 			var bag=new ConcurrentDictionary<string,double>(StringComparer.Ordinal);
 			var maintenance=new ConcurrentDictionary<string,double>(StringComparer.Ordinal);
-			int completed=0,failed=0;
+			int completed=0,failed=0,batchCount=0,historyQueries=0,total=pairs.Count;
 			string? lastError=null;
 			bool interrupted=false;
 			try
 			{
+				if(!mainSite)
+				{
+					try
+					{
+						var timers=await bearBulk.Value.FetchAsync(target.hunts.Select(h=>h.en).Distinct().ToArray(),target.worlds,token).ConfigureAwait(false);
+						foreach(var (key,timer) in timers)
+						{
+							bag[key]=timer.Timestamp;
+							if(timer.Maintenance)maintenance[key]=timer.Timestamp;
+						}
+						completed=batchCount=bag.Count;
+						if(completed==total)return;
+						pairs=pairs.Where(pair=>!bag.ContainsKey(pair.h+"|"+pair.w)).ToList();
+						if(batchCount>0)
+							_ = framework.RunOnTick(()=>
+							{
+								if(cts.IsCancellationRequested||generation!=bearRequestGeneration)return;
+								ApplyBearResult(bag,target,true,maintenance);
+								bearStatus=$"公开熊站 · 已批量加载 {batchCount}/{total} · 补查缺失项…";
+								nativeHud?.ForceMainRefresh();
+							});
+					}
+					catch(OperationCanceledException) when(token.IsCancellationRequested){throw;}
+					catch(HttpRequestException ex) when(ex.StatusCode==HttpStatusCode.TooManyRequests)
+					{failed++;interrupted=true;lastError="公开熊站限流，请稍后重试";return;}
+					catch(Exception ex){log.Warning("[SrankFlag] 公开熊站批量查询暂不可用，退回缺失项查询："+ex.Message);}
+				}
 				if(mainSite)
 				{
 					// Only 豆豆柴 may use the main site's aggregation endpoint.
@@ -8738,19 +8770,22 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 					if(DateTime.UtcNow-lastBearFallback<TimeSpan.FromMinutes(60))return;
 					lastBearFallback=DateTime.UtcNow;
 					pairs=pairs.Take(60).ToList();
+					total=pairs.Count;
 				}
 				// Other three DCs reach this branch only after an explicit manual refresh.
-				await Parallel.ForEachAsync(pairs,new ParallelOptions{MaxDegreeOfParallelism=2,CancellationToken=token},async(pair,ct)=>
+				await Parallel.ForEachAsync(pairs,new ParallelOptions{MaxDegreeOfParallelism=4,CancellationToken=token},async(pair,ct)=>
 				{
 					try
 					{
+						Interlocked.Increment(ref historyQueries);
 						var result=await BearQueryAsync(pair.h,pair.w,ct).ConfigureAwait(false);
 						bag[result.hunt+"|"+result.world]=result.ts;
 					}
-					catch(OperationCanceledException){throw;}
+					catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}
 					catch(Exception ex)
 					{
 						lastError=ex.Message;
+						if(ex is HttpRequestException {StatusCode:HttpStatusCode.TooManyRequests})request.Cancel();
 						if(Interlocked.Increment(ref failed)>=6&&bag.IsEmpty)request.Cancel();
 					}
 					int done=Interlocked.Increment(ref completed);
@@ -8759,7 +8794,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						{
 							if(cts.IsCancellationRequested||generation!=bearRequestGeneration)return;
 							ApplyBearResult(bag,target,true,maintenance);
-							bearStatus=$"公开熊站 · {done}/{pairs.Count} · {bag.Values.Count(value=>value>0)} 条记录 · {failed} 次失败";
+							bearStatus=$"公开熊站 · {done}/{total} · {bag.Values.Count(value=>value>0)} 条记录 · {failed} 次失败";
 							nativeHud?.ForceMainRefresh();
 						});
 				}).ConfigureAwait(false);
@@ -8777,8 +8812,8 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						bearNotify=false;
 						string origin=mainSite?"主站":"公开熊站";
 						bearStatus=bag.IsEmpty?$"{origin}暂不可用 · 点击刷新重试":$"{origin}已加载 {bag.Values.Count(value=>value>0)} 条记录"+((failed>0||interrupted)?$" · 部分未完成（{failed} 次失败）":"");
-						log.Information($"[SrankFlag.Bear] 加载结束：{dc} · {bag.Count} 条 · {completed}/{pairs.Count} · {failed} 次失败"+(lastError==null?"":" · "+lastError));
-						if(notify)Print(BearRefreshPolicy.CompletionNotice(dc,origin,bag.Values.Count(value=>value>0),bag.Count,failed,interrupted));
+						log.Information($"[SrankFlag.Bear] 加载结束：{dc} · {bag.Count} 条 · {completed}/{total} · {failed} 次失败 · 批量 {batchCount} · 逐条 {historyQueries} · {elapsed.ElapsedMilliseconds}ms"+(lastError==null?"":" · "+lastError));
+						if(notify)Print(BearRefreshPolicy.CompletionNotice(dc,origin,bag.Values.Count(value=>value>0),bag.Count,failed,interrupted)+$" · 耗时 {elapsed.Elapsed.TotalSeconds:F1} 秒");
 						nativeHud?.ForceMainRefresh();
 					});
 			}
