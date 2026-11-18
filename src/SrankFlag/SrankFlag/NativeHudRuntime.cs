@@ -39,6 +39,9 @@ internal sealed class NativeHudRuntime
 
 	private NativeHistoryWindow? historyWindow;
 	private ConditionWindow? conditionWindow;
+	private ConditionWindow? conditionFloating;
+	private readonly ConditionActions conditionFloatingActions;
+	private DateTime lastConditionFloatingSyncUtc;
 	private HiddenHuntWindow? hiddenHuntWindow;
 	private readonly HiddenHuntActions hiddenHuntActions;
 	private DateTime lastHiddenHuntsSyncUtc = DateTime.MinValue;
@@ -105,7 +108,7 @@ internal sealed class NativeHudRuntime
 		}
 	}
 
-	internal NativeHudRuntime(HudActions actions, AutoWindowActions autoActions, MainActions mainActions, SettingsActions settingsActions, HistoryActions historyActions, ConditionActions conditionActions, HiddenHuntActions hiddenHuntActions, Action<string> log)
+	internal NativeHudRuntime(HudActions actions, AutoWindowActions autoActions, MainActions mainActions, SettingsActions settingsActions, HistoryActions historyActions, ConditionActions conditionActions, ConditionActions conditionFloatingActions, HiddenHuntActions hiddenHuntActions, Action<string> log)
 	{
 		this.actions = actions;
 		this.autoActions = autoActions;
@@ -113,6 +116,7 @@ internal sealed class NativeHudRuntime
 		this.settingsActions = settingsActions;
 		this.historyActions = historyActions;
 		this.conditionActions = conditionActions;
+		this.conditionFloatingActions = conditionFloatingActions;
 		this.hiddenHuntActions = hiddenHuntActions;
 		this.log = log;
 		MainWindow.Logger = log;
@@ -328,6 +332,7 @@ internal sealed class NativeHudRuntime
 			"settings" => settingsWindow,
 			"history" => historyWindow,
 			"conditions" => conditionWindow,
+			"watch" => conditionFloating,
 			"hidden" => hiddenHuntWindow,
 			_ => null
 		};
@@ -387,34 +392,6 @@ internal sealed class NativeHudRuntime
 		});
 	}
 
-	internal void RestoreAfterTeleport(bool main, bool hud, bool auto, bool settings, bool history, bool conditions)
-	{
-		if (conditions) SetConditionsWindowOpen(true);
-        if (!disposed)
-		{
-			if (main)
-			{
-				SetMainWindowOpen(open: true);
-			}
-			if (hud)
-			{
-				SetHudWindowOpen(open: true);
-			}
-			if (auto)
-			{
-				SetAutoWindowOpen(open: true);
-			}
-			if (settings)
-			{
-				SetSettingsWindowOpen(open: true);
-			}
-			if (history)
-			{
-				SetHistoryWindowOpen(open: true);
-			}
-		}
-	}
-
 	private void ForceOne(NativeAddon? w, bool open, string name, Action resetThrottle)
 	{
 		if (w == null || disposed)
@@ -423,15 +400,11 @@ internal sealed class NativeHudRuntime
 		}
 		try
 		{
-			if (open)
+			if (open && !w.IsOpen)
 			{
-				if (w.IsOpen)
-				{
-					SuppressClose(w);
-				}
 				w.Open();
 			}
-			else if (w.IsOpen)
+			else if (!open && w.IsOpen)
 			{
 				SuppressClose(w);
 			}
@@ -677,20 +650,31 @@ internal sealed class NativeHudRuntime
 	}
 
 	internal void TickConditions(bool open, ConditionSnapshot snapshot)
+		=> TickConditionWindow(ref conditionWindow, ref lastConditionsSyncUtc, open, snapshot, false);
+
+	internal void TickConditionFloating(bool open, ConditionSnapshot snapshot)
+		=> TickConditionWindow(ref conditionFloating, ref lastConditionFloatingSyncUtc, open, snapshot, true);
+
+	private void TickConditionWindow(ref ConditionWindow? target, ref DateTime lastSync, bool open, ConditionSnapshot snapshot, bool floating)
 	{
-		if (disposed || failed || !InitReady()) return;
+		if (disposed || failed || (!open && target == null) || !InitReady()) return;
+		if ((DateTime.UtcNow - lastSync).TotalMilliseconds < 200) return;
+		lastSync = DateTime.UtcNow;
 		try
 		{
-			conditionWindow ??= new ConditionWindow(conditionActions) { InternalName="MagicBucketNativeConditions", Title="魔法水桶 · 条件订阅", Size=new Vector2(450,520) };
-			if ((DateTime.UtcNow-lastConditionsSyncUtc).TotalMilliseconds < 200) return;
-			lastConditionsSyncUtc=DateTime.UtcNow;
-			if (open && !conditionWindow.IsOpen) conditionWindow.Open();
-			else if (!open && conditionWindow.IsOpen)
+			target ??= new ConditionWindow(floating ? conditionFloatingActions : conditionActions, floating)
 			{
-				conditionWindow.SuppressClosed=true;
-				try { conditionWindow.Close(); } finally { conditionWindow.SuppressClosed=false; }
+				InternalName = floating ? "MagicBucketNativeWatch" : "MagicBucketNativeConditions",
+				Title = floating ? "魔法水桶 · S 怪提醒" : "魔法水桶 · 条件订阅",
+				Size = floating ? new Vector2(345, 320) : new Vector2(450, 520)
+			};
+			if (open && !target.IsOpen) target.Open();
+			else if (!open && target.IsOpen)
+			{
+				target.SuppressClosed = true;
+				try { target.Close(); } finally { target.SuppressClosed = false; }
 			}
-			if (conditionWindow.IsOpen) conditionWindow.Apply(snapshot);
+			if (target.IsOpen) target.Apply(snapshot);
 		}
 		catch (Exception ex) { log("[原生UI] 条件订阅刷新失败："+ex); }
 	}
@@ -731,6 +715,8 @@ internal sealed class NativeHudRuntime
 			return;
 		}
 		disposed = true;
+		try { if (conditionFloating != null) { conditionFloating.SuppressClosed = true; conditionFloating.Dispose(); conditionFloating = null; } }
+		catch (Exception ex) { log("[原生UI] 订阅悬浮窗关闭失败：" + ex.Message); }
 		try
 		{
 			if (hiddenHuntWindow != null)

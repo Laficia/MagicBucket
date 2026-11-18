@@ -329,7 +329,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private DateTime autoTravelAt;
 
-	private int autoTravelRetry;
 
 	private const int AutoTravelRetries = 2;
 
@@ -565,38 +564,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 	private bool mainWindowOpen = true;
 
 	private bool settingsWindowOpen;
-
-	private bool teleportSnapshotPending;
-
-	private bool teleportSnapshotMain;
-
-	private bool teleportSnapshotHud;
-
-	private bool teleportSnapshotAuto;
-
-	private bool teleportSnapshotSettings;
-
-	private bool teleportSnapshotHistory;
-    private bool teleportSnapshotConditions;
-
-	private DateTime teleportSnapshotAtUtc = DateTime.MinValue;
-
-	private DateTime restoreAfterTeleportUtc = DateTime.MinValue;
-
-	private bool wasBetweenAreas;
-
-	private bool stableWindowMain;
-
-	private bool stableWindowHud;
-
-	private bool stableWindowAuto;
-
-	private bool stableWindowSettings;
-
-	private bool stableWindowHistory;
-    private bool stableWindowConditions;
-
-	private bool stableWindowValid;
 
 	private int runGen;
 
@@ -1165,7 +1132,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		autoToken++;
 		autoPaused = false;
 		autoPauseReason = "";
-		CaptureWindowStateBeforeTeleport();
 		if (flag)
 		{
 			try
@@ -1398,7 +1364,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		autoDiscardDoneAt = default;
 		autoLastLogAt = default;
 		autoTravelAt = default;
-		autoTravelRetry = 0;
 		try
 		{
 			StopAll(quiet: true);
@@ -1502,7 +1467,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 		autoJobStart = DateTime.UtcNow;
 		autoTravelAt = autoJobStart;
-		autoTravelRetry = 0;
 		autoLastLogAt = autoJobStart;
 		AutoMonitor(job, greens);
 	}
@@ -1526,6 +1490,12 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		{
 			if (token == autoToken && autoRunning && autoHit.Length <= 0 && !AutoPrepFailedStep(job))
 			{
+				if (travelPreparationPending)
+				{
+					autoStatus = $"{job.World} · {job.HuntCn} 等待落地及触发准备";
+					AutoMonitor(job, greens);
+					return;
+				}
 				AutoMaybeRetryRoute(job, greens);
 				DateTime utcNow = DateTime.UtcNow;
 				double totalSeconds = (utcNow - autoJobStart).TotalSeconds;
@@ -1543,7 +1513,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				}
 				try
 				{
-					if (!travelPreparationPending && flag && flag2 && !IsZoning() && greens.Count > 0 && TryResolveZone(job.Map, out uint _, out uint mapId, out string _))
+					if (flag && flag2 && !IsZoning() && greens.Count > 0 && TryResolveZone(job.Map, out uint _, out uint mapId, out string _))
 					{
 						float num = YalmsTo(mapId, greens[0].X, greens[0].Y);
 						autoDist = num;
@@ -1553,7 +1523,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 							return;
 						}
 					}
-					else if (!travelPreparationPending && !IsZoning() && greens.Count == 0 && flag && flag2)
+					else if (!IsZoning() && greens.Count == 0 && flag && flag2)
 					{
 						autoDist = 0f;
 						AutoBeginWait(job, token);
@@ -1574,20 +1544,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						autoSkipped.Add((job.HuntCn, text + "失败", $"{text} {num2:F0} 秒没成功（{job.World}）"));
 						AutoStep();
 						return;
-					}
-					if (totalSeconds2 >= 20.0 * (double)(autoTravelRetry + 1) && autoTravelRetry < 2)
-					{
-						autoTravelRetry++;
-						autoTravelAt = utcNow;
-						Print($"[自动前往] {text}没动静（已经 {totalSeconds2:F0} 秒），重发一次（第 {autoTravelRetry} 次）");
-						if (!flag)
-						{
-							SendWorldTravel(job.World);
-						}
-						else
-						{
-							AutoRetryTeleport(job, greens);
-						}
 					}
 					autoStatus = ((!flag) ? $"{job.World} · {job.HuntCn} 跨服中（→ {job.World}，{totalSeconds2:F0}s）" : $"{job.World} · {job.HuntCn} 传送中（{job.Map}，{totalSeconds2:F0}s）");
 				}
@@ -1649,23 +1605,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		Print($"[自动前往] {job.World} · {job.HuntCn} 出发 30 秒还没开始巡点/自爆，" + "重新排一次点位动作（多半是换装或上坐骑那一步被卡住）");
 		Resume();
 		StartGreenRoute(job.Map, greens, job.HuntCn);
-	}
-
-	private void AutoRetryTeleport(AutoJob job, List<Pt> greens)
-	{
-		try
-		{
-			float x = ((greens.Count > 0) ? greens[0].X : 0f);
-			float y = ((greens.Count > 0) ? greens[0].Y : 0f);
-			AetheryteHit? aetheryteHit = NearestAetheryte(job.Map, x, y, job.HuntCn);
-			if (aetheryteHit.HasValue)
-			{
-				TryNativeTeleport(aetheryteHit.GetValueOrDefault(), out _);
-			}
-		}
-		catch
-		{
-		}
 	}
 
 	private void AutoBeginWait(AutoJob job, int token)
@@ -2100,10 +2039,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			{
 				AutoStart();
 			},
-			Closed = () =>
-			{
-				autoHudOpen = false;
-			}
+			Closed = () => QueueNativeWindowClose(() => autoHudOpen = false)
 		};
 	}
 
@@ -2248,10 +2184,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 					AutoStart();
 				}
 			},
-			Closed = () =>
-			{
-				autoRunOpen = false;
-			}
+			Closed = () => QueueNativeWindowClose(() => autoRunOpen = false)
 		};
 	}
 
@@ -2824,7 +2757,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 		CommandInfo info = new CommandInfo(OnCommand)
 		{
-			HelpMessage = "魔法水桶：/水桶 conditions 条件订阅 · /水桶 size <main|auto|hud|settings|history|conditions> <宽度> <高度> 调整窗口 · /水桶 打开游戏内窗口 · /水桶 history 打开 S 怪历史 · /水桶 sonar [test|probe|clear] 实时击杀自检 · /水桶 trigger 查看已被他人触发的 S（与看板一致）· /水桶 trigger main on|off 看板源开关 · /水桶 trigger scan 与看板对账 · /水桶 trigger clear 清空黑名单 · /水桶 nav <地图> <X> <Y>（开图插旗+vnav寻路） · /水桶 goto <地图> <X> <Y> [服务器] [分线] · /水桶 discard · /水桶 weea · /水桶 stop（取消全部自动流程） · /水桶 summon [手动召唤随从] · /水桶 summonauto on|off · /水桶 leaveauto on|off",
+			HelpMessage = "魔法水桶：/水桶 conditions 条件订阅 · /水桶 watch 订阅悬浮窗 · /水桶 size <main|auto|hud|settings|history|conditions|watch|hidden> <宽度> <高度> 调整窗口 · /水桶 打开游戏内窗口 · /水桶 history 打开 S 怪历史 · /水桶 sonar [test|probe|clear] 实时击杀自检 · /水桶 trigger 查看已被他人触发的 S（与看板一致）· /水桶 trigger main on|off 看板源开关 · /水桶 trigger scan 与看板对账 · /水桶 trigger clear 清空黑名单 · /水桶 nav <地图> <X> <Y>（开图插旗+vnav寻路） · /水桶 goto <地图> <X> <Y> [服务器] [分线] · /水桶 discard · /水桶 weea · /水桶 stop（取消全部自动流程） · /水桶 summon [手动召唤随从] · /水桶 summonauto on|off · /水桶 leaveauto on|off",
 			ShowInHelp = true
 		};
 		this.commandManager.AddHandler("/srankflag", info);
@@ -2880,7 +2813,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	public void Dispose()
 	{
-		teleportSnapshotPending = false;
 		try
 		{
 			SavePrefs();
@@ -2935,7 +2867,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		{
 			mainWindowOpen = !mainWindowOpen;
 			ApplyMainWindowNow();
-			NoteUserWindowChange();
 			Print(mainWindowOpen ? "主窗已打开" : "主窗已关闭（再敲 /水桶 可开回来）");
 			return;
 		}
@@ -2951,7 +2882,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		case "settings":
 			settingsWindowOpen = !settingsWindowOpen;
 			nativeHud?.SetSettingsWindowOpen(settingsWindowOpen);
-			NoteUserWindowChange();
 			break;
 		case "detail":
 			string query = string.Join(" ", array.Skip(1));
@@ -2960,19 +2890,20 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			mainWindowOpen = true;
 			nativeHud?.ShowMainDetails(detailRow.Key);
 			ApplyMainWindowNow();
-			NoteUserWindowChange();
 			break;
 		case "size":
 			if (array.Length == 4 && int.TryParse(array[2], out int width) && int.TryParse(array[3], out int height) && width > 0 && height > 0 && nativeHud?.ResizeWindow(array[1], width, height) == true)
 				Print($"窗口尺寸已保存：{array[1]} · {width}×{height}");
 			else
-				Print("用法：/水桶 size <main|auto|hud|settings|history|conditions> <宽度> <高度>；也可拖动右下角调整。");
+				Print("用法：/水桶 size <main|auto|hud|settings|history|conditions|watch|hidden> <宽度> <高度>；也可拖动右下角调整。");
 			break;
 		case "history":
 			historyWindowOpen = !historyWindowOpen;
 			ApplyHistoryWindowNow();
-			NoteUserWindowChange();
 			Print(historyWindowOpen ? "S 怪历史窗口已打开" : "S 怪历史窗口已关闭");
+			break;
+		case "watch":
+			ToggleConditionFloating();
 			break;
 		case "conditions":
 		case "condition":
@@ -3157,12 +3088,10 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		case "ui":
 			mainWindowOpen = !mainWindowOpen;
 			ApplyMainWindowNow();
-			NoteUserWindowChange();
 			break;
 		case "legacy":
 			mainWindowOpen = true;
 			ApplyMainWindowNow();
-			NoteUserWindowChange();
 			Print("旧 ImGui 完整版已移除；已打开原生主窗。");
 			break;
 		case "mount":
@@ -3301,7 +3230,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private GotoResult Goto(string map, float x, float y, string world, int line, string huntCn = "", bool nav = false, List<Pt>? route = null)
 	{
-		CaptureWindowStateBeforeTeleport();
 		StopAll(quiet: true);
 		Resume();
 		FlagResult flagResult = Flag(map, x, y);
@@ -5530,7 +5458,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private GotoResult GotoAetheryte(string map, string world, string huntCn = "")
 	{
-		CaptureWindowStateBeforeTeleport();
 		StopAll(quiet: true);
 		Resume();
 		AetheryteHit? ae = NearestAetheryte(map, 0f, 0f, huntCn);
@@ -6469,13 +6396,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 	{
 		try
 		{
-			TickTeleportWindowRestore();
-		}
-		catch
-		{
-		}
-		try
-		{
 			if (autoSummonMinion)
 			{
 				TryAutoSummon();
@@ -6499,6 +6419,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private void ApplyMainWindowNow()
 	{
+		CancelPendingWindowClose();
 		try
 		{
 			nativeHud?.ReviveAfterError();
@@ -6536,166 +6457,11 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 	}
 
-	private void CaptureWindowStateBeforeTeleport()
-	{
-		if (teleportSnapshotPending)
-		{
-			teleportSnapshotAtUtc = DateTime.UtcNow;
-			return;
-		}
-		if (!stableWindowValid)
-		{
-			RecordStableWindowState();
-		}
-		bool flag = false;
-		try
-		{
-			flag = condition[ConditionFlag.BetweenAreas];
-		}
-		catch
-		{
-		}
-		if (!flag)
-		{
-			RecordStableWindowState();
-		}
-		teleportSnapshotMain = stableWindowMain;
-		teleportSnapshotHud = stableWindowHud;
-		teleportSnapshotAuto = stableWindowAuto;
-		teleportSnapshotSettings = stableWindowSettings;
-		teleportSnapshotHistory = stableWindowHistory;
-        teleportSnapshotConditions = stableWindowConditions;
-		teleportSnapshotPending = true;
-		teleportSnapshotAtUtc = DateTime.UtcNow;
-		restoreAfterTeleportUtc = DateTime.MinValue;
-	}
-
-	private void RecordStableWindowState()
-	{
-		stableWindowMain = mainWindowOpen;
-		stableWindowHud = autoHudOpen;
-		stableWindowAuto = autoRunOpen;
-		stableWindowSettings = settingsWindowOpen;
-		stableWindowHistory = historyWindowOpen;
-        stableWindowConditions = conditionWindowOpen;
-		stableWindowValid = true;
-	}
-
-	private void SyncSnapshotFromStable()
-	{
-		if (teleportSnapshotPending)
-		{
-			teleportSnapshotMain = stableWindowMain;
-			teleportSnapshotHud = stableWindowHud;
-			teleportSnapshotAuto = stableWindowAuto;
-			teleportSnapshotSettings = stableWindowSettings;
-			teleportSnapshotHistory = stableWindowHistory;
-        teleportSnapshotConditions = stableWindowConditions;
-		}
-	}
-
-	private void NoteUserWindowChange()
-	{
-		RecordStableWindowState();
-		SyncSnapshotFromStable();
-	}
-
-	private void TickTeleportWindowRestore()
-	{
-		bool flag;
-		try
-		{
-			flag = condition[ConditionFlag.BetweenAreas];
-		}
-		catch
-		{
-			return;
-		}
-		bool flag2;
-		try
-		{
-			flag2 = clientState.IsLoggedIn && objectTable.LocalPlayer != null;
-		}
-		catch
-		{
-			return;
-		}
-		if (flag)
-		{
-			if (!teleportSnapshotPending)
-			{
-				CaptureWindowStateBeforeTeleport();
-			}
-			teleportSnapshotAtUtc = DateTime.UtcNow;
-			wasBetweenAreas = true;
-			restoreAfterTeleportUtc = DateTime.MinValue;
-			return;
-		}
-		if (flag2)
-		{
-			RecordStableWindowState();
-			if (teleportSnapshotPending && restoreAfterTeleportUtc == DateTime.MinValue)
-			{
-				SyncSnapshotFromStable();
-			}
-		}
-		bool flag3 = wasBetweenAreas;
-		wasBetweenAreas = false;
-		if (!teleportSnapshotPending)
-		{
-			return;
-		}
-		if ((DateTime.UtcNow - teleportSnapshotAtUtc).TotalSeconds > 90.0)
-		{
-			teleportSnapshotPending = false;
-			restoreAfterTeleportUtc = DateTime.MinValue;
-		}
-		else
-		{
-			if (!flag2)
-			{
-				return;
-			}
-			if (restoreAfterTeleportUtc == DateTime.MinValue)
-			{
-				int num = (flag3 ? 500 : 2000);
-				restoreAfterTeleportUtc = DateTime.UtcNow.AddMilliseconds(num);
-			}
-			if (DateTime.UtcNow < restoreAfterTeleportUtc)
-			{
-				return;
-			}
-			restoreAfterTeleportUtc = DateTime.MinValue;
-			teleportSnapshotPending = false;
-			mainWindowOpen = teleportSnapshotMain;
-			autoHudOpen = teleportSnapshotHud;
-			autoRunOpen = teleportSnapshotAuto;
-			settingsWindowOpen = teleportSnapshotSettings;
-			historyWindowOpen = teleportSnapshotHistory;
-            conditionWindowOpen = teleportSnapshotConditions;
-			RecordStableWindowState();
-			try
-			{
-				nativeHud?.RestoreAfterTeleport(teleportSnapshotMain, teleportSnapshotHud, teleportSnapshotAuto, teleportSnapshotSettings, teleportSnapshotHistory, teleportSnapshotConditions);
-			}
-			catch (Exception exception)
-			{
-				try
-				{
-					log.Warning(exception, "[魔法水桶] 落地窗口恢复失败");
-				}
-				catch
-				{
-				}
-			}
-		}
-	}
-
 	private void InitNativeHud()
 	{
 		try
 		{
-			nativeHud = new NativeHudRuntime(BuildHudActions(), BuildAutoWindowActions(), BuildMainActions(), BuildSettingsActions(), BuildHistoryActions(), BuildConditionActions(), BuildHiddenHuntActions(), (string msg) =>
+			nativeHud = new NativeHudRuntime(BuildHudActions(), BuildAutoWindowActions(), BuildMainActions(), BuildSettingsActions(), BuildHistoryActions(), BuildConditionActions(), BuildConditionFloatingActions(), BuildHiddenHuntActions(), (string msg) =>
 			{
 				log.Info("[魔法水桶] " + msg);
 			});
@@ -6716,6 +6482,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private void TickNativeHud()
 	{
+		if (!NativeWindowsReady()) return;
 		TickConditionUi();
 		TickHiddenHuntUi();
 		NativeHudRuntime nativeHudRuntime = nativeHud;
@@ -6856,11 +6623,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				MaybeRefreshRestart(force: true);
 				nativeHud?.ForceMainRefresh();
 			},
-			Closed = () =>
-			{
-				settingsWindowOpen = false;
-				nativeHud?.SetSettingsWindowOpen(open: false);
-			}
+			Closed = () => QueueNativeWindowClose(() => settingsWindowOpen = false)
 		};
 	}
 
@@ -6902,12 +6665,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				nativeHud?.ForceHistoryRefresh();
 				Print("已清空 S 怪历史记录（srank_history.json）");
 			},
-			Closed = () =>
-			{
-				historyWindowOpen = false;
-				nativeHud?.SetHistoryWindowOpen(open: false);
-				NoteUserWindowChange();
-			}
+			Closed = () => QueueNativeWindowClose(() => historyWindowOpen = false)
 		};
 	}
 
@@ -7016,7 +6774,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			{
 				historyWindowOpen = !historyWindowOpen;
 				ApplyHistoryWindowNow();
-				NoteUserWindowChange();
 			},
 			OpenHidden = ToggleHiddenHunts,
 			HideHunt = HideHunt,
@@ -7125,10 +6882,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			{
 				huntWorld[en] = w;
 			},
-			Closed = () =>
-			{
-				mainWindowOpen = false;
-			}
+			Closed = () => QueueNativeWindowClose(() => mainWindowOpen = false)
 		};
 	}
 
@@ -7416,7 +7170,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			nativeHud?.ForceMainRefresh();
 			return;
 		}
-		CaptureWindowStateBeforeTeleport();
 		List<Pt> list = GreensFor(h, world);
 		bool flag = DiscardMaps.ContainsKey(h.map);
 		bool flag2 = list.Count > 0;
@@ -10738,7 +10491,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						await WriteAsync(stream, 400, Json(ok: false, "map 不能为空"));
 						return;
 					}
-					GotoResult gotoResult = Goto(text5, x2, y2, world, line);
+					GotoResult gotoResult = await framework.RunOnFrameworkThread(() => Goto(text5, x2, y2, world, line));
 					await WriteAsync(stream, gotoResult.Ok ? 200 : 404, Json(gotoResult.Ok, gotoResult.Message));
 					return;
 				}
@@ -10750,7 +10503,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						await WriteAsync(stream, 400, Json(ok: false, "map 不能为空"));
 						return;
 					}
-					FlagResult flagResult2 = TeleportNearest(text6, x3, y3);
+					FlagResult flagResult2 = await framework.RunOnFrameworkThread(() => TeleportNearest(text6, x3, y3));
 					await WriteAsync(stream, flagResult2.Ok ? 200 : 404, Json(flagResult2.Ok, flagResult2.Message));
 					return;
 				}

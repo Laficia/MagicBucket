@@ -12,6 +12,7 @@ public sealed partial class Plugin
 
     private void ToggleHiddenHunts()
     {
+        CancelPendingWindowClose();
         hiddenHuntsOpen = !hiddenHuntsOpen;
         lastHiddenHuntBuildUtc = DateTime.MinValue;
         nativeHud?.ForceMainRefresh();
@@ -47,7 +48,7 @@ public sealed partial class Plugin
             try { Visibility.RestoreAll(); nativeHud?.ForceMainRefresh(); Print("已恢复全部隐藏的 S 怪。"); }
             catch (Exception ex) { log.Error(ex, "[魔法水桶] 恢复全部隐藏项失败"); Print("恢复失败：" + ex.Message); }
         },
-        Closed = () => hiddenHuntsOpen = false
+        Closed = () => QueueNativeWindowClose(() => hiddenHuntsOpen = false)
     };
     private HiddenHuntSnapshot BuildHiddenHuntSnapshot()
     {

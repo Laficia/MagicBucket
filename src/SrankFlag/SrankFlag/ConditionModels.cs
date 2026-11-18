@@ -9,6 +9,7 @@ internal sealed class ConditionActions
     internal Action<string> Toggle = _ => { };
     internal Action<bool> SelectAll = _ => { };
     internal Action ToggleView = () => { };
+    internal Action ToggleFloating = () => { };
     internal Action Closed = () => { };
 }
 internal sealed class ConditionWorld
@@ -26,7 +27,7 @@ internal sealed class ConditionEntry
 }
 internal sealed class ConditionSnapshot
 {
-    internal string Dc = "";
+    internal string Dc = "", Search = "";
     internal bool OnlySubscribed;
     internal readonly List<ConditionEntry> Rows = [];
     internal int Total, Subscribed;

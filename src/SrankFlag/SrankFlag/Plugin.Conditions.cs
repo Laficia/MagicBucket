@@ -6,6 +6,7 @@ namespace SrankFlag;
 public sealed partial class Plugin
 {
     private bool conditionWindowOpen;
+    private bool conditionFloatingOpen;
     private bool conditionOnlySubscribed = true;
     private string conditionSearch = "";
     private ConditionSubscriptions? conditionSubscriptions;
@@ -14,10 +15,11 @@ public sealed partial class Plugin
 
     private void ToggleConditions()
     {
+        CancelPendingWindowClose();
         conditionWindowOpen=!conditionWindowOpen;
         lastConditionBuildUtc=DateTime.MinValue;
         nativeHud?.SetConditionsWindowOpen(conditionWindowOpen);
-        NoteUserWindowChange();
+
     }
 
     private ConditionActions BuildConditionActions() => new()
@@ -26,27 +28,52 @@ public sealed partial class Plugin
         Toggle=en=> {Subscriptions.Toggle(en);lastConditionBuildUtc=DateTime.MinValue;},
         SelectAll=selected=> {Subscriptions.SelectAll(selected);lastConditionBuildUtc=DateTime.MinValue;},
         ToggleView=()=> {conditionOnlySubscribed=!conditionOnlySubscribed;lastConditionBuildUtc=DateTime.MinValue;},
-        Closed=()=> {conditionWindowOpen=false;NoteUserWindowChange();}
+        ToggleFloating=ToggleConditionFloating,
+        Closed=()=> QueueNativeWindowClose(() => conditionWindowOpen=false)
+    };
+
+    private void ToggleConditionFloating()
+    {
+        CancelPendingWindowClose();
+        conditionFloatingOpen = !conditionFloatingOpen;
+        lastConditionBuildUtc = DateTime.MinValue;
+    }
+
+    private ConditionActions BuildConditionFloatingActions() => new()
+    {
+        ToggleView = () =>
+        {
+            conditionWindowOpen = true;
+            conditionOnlySubscribed = false;
+            conditionSearch = "";
+            lastConditionBuildUtc = DateTime.MinValue;
+        },
+        Closed = () => QueueNativeWindowClose(() => conditionFloatingOpen = false)
     };
 
     private void TickConditionUi()
     {
         if (nativeHud==null || (DateTime.UtcNow-lastConditionBuildUtc).TotalMilliseconds<250) return;
         lastConditionBuildUtc=DateTime.UtcNow;
-        try { nativeHud.TickConditions(conditionWindowOpen,conditionWindowOpen?BuildConditionSnapshot():new ConditionSnapshot()); }
+        try
+        {
+            nativeHud.TickConditions(conditionWindowOpen, conditionWindowOpen ? BuildConditionSnapshot() : new ConditionSnapshot());
+            nativeHud.TickConditionFloating(conditionFloatingOpen, conditionFloatingOpen ? BuildConditionSnapshot(floating: true) : new ConditionSnapshot());
+        }
         catch(Exception ex) { log.Error(ex,"[魔法水桶] 条件订阅同步失败，其余窗口继续运行"); }
     }
 
-    private ConditionSnapshot BuildConditionSnapshot()
+    private ConditionSnapshot BuildConditionSnapshot(bool floating = false)
     {
-        var snapshot=new ConditionSnapshot { Dc=currentDc,OnlySubscribed=conditionOnlySubscribed,Total=ConditionCatalog.All.Count,Subscribed=ConditionCatalog.All.Count(x=>Subscriptions.Contains(x.En)) };
+        string search = floating || conditionOnlySubscribed ? "" : conditionSearch;
+        var snapshot=new ConditionSnapshot { Dc=currentDc, Search=search, OnlySubscribed=floating || conditionOnlySubscribed,Total=ConditionCatalog.All.Count,Subscribed=ConditionCatalog.All.Count(x=>Subscriptions.Contains(x.En)) };
         var data=srankData?.data;
         long now=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         foreach(var definition in ConditionCatalog.All)
         {
             bool subscribed=Subscriptions.Contains(definition.En);
-            if(conditionOnlySubscribed&&!subscribed)continue;
-            if(conditionSearch.Length>0&&!(definition.Cn+" "+definition.En+" "+definition.Method).Contains(conditionSearch,StringComparison.OrdinalIgnoreCase))continue;
+            if(snapshot.OnlySubscribed&&!subscribed)continue;
+            if(search.Length>0&&!(definition.Cn+" "+definition.En+" "+definition.Method).Contains(search,StringComparison.OrdinalIgnoreCase))continue;
             bool timed=ConditionForecast.HasSpec(definition.En);
             var window=timed?ConditionForecast.NextWindow(definition.En,now):null;
             var time=ConditionClock.Evaluate(timed,window?.Start,window?.End,now);
@@ -78,6 +105,7 @@ public sealed partial class Plugin
         }
         snapshot.Rows.Sort((a,b)=>
         {
+            if (!snapshot.OnlySubscribed) return string.CompareOrdinal(a.Name, b.Name);
             static int Priority(ConditionPhase phase)=>phase switch {ConditionPhase.Active=>0,ConditionPhase.Soon=>1,ConditionPhase.Waiting=>2,_=>3};
             int order=Priority(a.Phase).CompareTo(Priority(b.Phase));
             if(order!=0)return order;
