@@ -29,6 +29,7 @@ internal sealed class MainSnapshot
 	internal string CurrentWorld = "";
 
 	internal bool NeedsManualRefresh;
+	internal int HiddenCount;
 
 	internal readonly List<string> Worlds = new List<string>();
 

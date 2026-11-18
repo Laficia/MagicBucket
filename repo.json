@@ -22,7 +22,7 @@
     "LoadPriority": 0,
     "Punchline": "原生窗口与条件倒计时，三大区手动查询公开熊站。",
     "AcceptsFeedback": true,
-    "Changelog": "1.2.14.4：大水晶改用游戏原生传送，确认目标服务器、地图和过图完成后才执行准备；传送失败立即停止后续制作、采集和触发，停止命令清除自动队列。",
+    "Changelog": "1.2.14.4：原生传送并确认落地后再准备，失败停止后续动作；右键详情可隐藏该类 S 怪，设置旁“已隐藏”支持逐项及全部恢复，跨服跨区保存。",
     "DownloadLinkInstall": "https://github.com/Laficia/MagicBucket/releases/download/v1.2.14.4/SrankFlag.zip",
     "DownloadLinkUpdate": "https://github.com/Laficia/MagicBucket/releases/download/v1.2.14.4/SrankFlag.zip",
     "DownloadLinkTesting": "https://github.com/Laficia/MagicBucket/releases/download/v1.2.14.4/SrankFlag.zip",

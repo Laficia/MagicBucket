@@ -1182,7 +1182,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			Print("[自动前往] 数据还没加载好，稍后再试");
 			return;
 		}
-		List<HuntData> list = snapshotData.hunts.Where((HuntData huntData) => autoHunts.Contains(huntData.cn) && AutoMapOk(huntData)).ToList();
+		List<HuntData> list = snapshotData.hunts.Where((HuntData huntData) => !Visibility.IsHidden(huntData.en) && autoHunts.Contains(huntData.cn) && AutoMapOk(huntData)).ToList();
 		List<string> list2 = snapshotData.worlds.Where((string w) => w.Length > 0).ToList();
 		List<string> list3 = (autoAllWorlds ? list2 : list2.Where((string w) => autoWorlds.Contains(w)).ToList());
 		if (list.Count == 0 || list3.Count == 0)
@@ -1361,13 +1361,14 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		while (autoIdx < autoQueue.Count)
 		{
 			AutoJob autoJob = autoQueue[autoIdx];
-			if (!IsTriggered(autoJob.HuntEn, autoJob.World))
+			if (!Visibility.IsHidden(autoJob.HuntEn) && !IsTriggered(autoJob.HuntEn, autoJob.World))
 			{
 				break;
 			}
 			autoIdx++;
-			autoSkipped.Add((autoJob.HuntCn, "已被触发", "出发前发现已被他人触发（" + autoJob.World + "）"));
-			Print($"[自动前往] {autoJob.World} · {autoJob.HuntCn} 已触发，跳过（不出门）");
+			bool hidden = Visibility.IsHidden(autoJob.HuntEn);
+			autoSkipped.Add((autoJob.HuntCn, hidden ? "手动隐藏" : "已被触发", hidden ? "该种类已隐藏" : "出发前发现已被他人触发（" + autoJob.World + "）"));
+			Print($"[自动前往] {autoJob.World} · {autoJob.HuntCn} {(hidden ? "已隐藏" : "已触发")}，跳过（不出门）");
 		}
 		if (autoIdx >= autoQueue.Count)
 		{
@@ -2311,7 +2312,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			{
 				states[huntData.cn] = BestStateOf(huntData, now);
 			}
-			IEnumerable<HuntData> source = hunts.Where((HuntData x) => AutoShown(x, states));
+			IEnumerable<HuntData> source = hunts.Where((HuntData x) => !Visibility.IsHidden(x.en) && AutoShown(x, states));
 			foreach (HuntData item2 in ((autoStyle == 1) ? source.OrderBy((HuntData x) => x.patch).ThenBy((HuntData x) => x.cn, StringComparer.Ordinal) : source.OrderBy((HuntData x) => x.cn, StringComparer.Ordinal)).ToList())
 			{
 				(string, double, double) tuple = (states.TryGetValue(item2.cn, out (string, double, double) value3) ? value3 : ("unknown", 0.0, 0.0));
@@ -6694,7 +6695,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 	{
 		try
 		{
-			nativeHud = new NativeHudRuntime(BuildHudActions(), BuildAutoWindowActions(), BuildMainActions(), BuildSettingsActions(), BuildHistoryActions(), BuildConditionActions(), (string msg) =>
+			nativeHud = new NativeHudRuntime(BuildHudActions(), BuildAutoWindowActions(), BuildMainActions(), BuildSettingsActions(), BuildHistoryActions(), BuildConditionActions(), BuildHiddenHuntActions(), (string msg) =>
 			{
 				log.Info("[魔法水桶] " + msg);
 			});
@@ -6716,6 +6717,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 	private void TickNativeHud()
 	{
 		TickConditionUi();
+		TickHiddenHuntUi();
 		NativeHudRuntime nativeHudRuntime = nativeHud;
 		if (nativeHudRuntime == null)
 		{
@@ -7016,6 +7018,8 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				ApplyHistoryWindowNow();
 				NoteUserWindowChange();
 			},
+			OpenHidden = ToggleHiddenHunts,
+			HideHunt = HideHunt,
 			Mini = () =>
 			{
 			},
@@ -7137,6 +7141,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		mainSnapshot.Search = searchText;
 		mainSnapshot.OnlyOpen = onlyOpen;
 		mainSnapshot.Fetching = bearFetching;
+		mainSnapshot.HiddenCount = Visibility.Hidden.Count;
 		mainSnapshot.CurrentWorld = CurrentWorldName();
 		mainSnapshot.Dc = snapshotData?.dc ?? currentDc;
 		mainSnapshot.Status = bearStatus;
@@ -7201,7 +7206,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		HuntData[] hunts = snapshotData.hunts;
 		foreach (HuntData huntData in hunts)
 		{
-			if ((patchSel.Count > 0 && !patchSel.Contains(huntData.patch)) || (searchText.Length > 0 && !(huntData.cn + " " + huntData.en + " " + huntData.map).Contains(searchText, StringComparison.OrdinalIgnoreCase)))
+			if (Visibility.IsHidden(huntData.en) || (patchSel.Count > 0 && !patchSel.Contains(huntData.patch)) || (searchText.Length > 0 && !(huntData.cn + " " + huntData.en + " " + huntData.map).Contains(searchText, StringComparison.OrdinalIgnoreCase)))
 			{
 				continue;
 			}

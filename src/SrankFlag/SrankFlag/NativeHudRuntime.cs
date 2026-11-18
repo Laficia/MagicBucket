@@ -39,6 +39,9 @@ internal sealed class NativeHudRuntime
 
 	private NativeHistoryWindow? historyWindow;
 	private ConditionWindow? conditionWindow;
+	private HiddenHuntWindow? hiddenHuntWindow;
+	private readonly HiddenHuntActions hiddenHuntActions;
+	private DateTime lastHiddenHuntsSyncUtc = DateTime.MinValue;
 	private readonly ConditionActions conditionActions;
 	private DateTime lastConditionsSyncUtc = DateTime.MinValue;
 
@@ -102,7 +105,7 @@ internal sealed class NativeHudRuntime
 		}
 	}
 
-	internal NativeHudRuntime(HudActions actions, AutoWindowActions autoActions, MainActions mainActions, SettingsActions settingsActions, HistoryActions historyActions, ConditionActions conditionActions, Action<string> log)
+	internal NativeHudRuntime(HudActions actions, AutoWindowActions autoActions, MainActions mainActions, SettingsActions settingsActions, HistoryActions historyActions, ConditionActions conditionActions, HiddenHuntActions hiddenHuntActions, Action<string> log)
 	{
 		this.actions = actions;
 		this.autoActions = autoActions;
@@ -110,6 +113,7 @@ internal sealed class NativeHudRuntime
 		this.settingsActions = settingsActions;
 		this.historyActions = historyActions;
 		this.conditionActions = conditionActions;
+		this.hiddenHuntActions = hiddenHuntActions;
 		this.log = log;
 		MainWindow.Logger = log;
 		SettingsWindow.Logger = log;
@@ -324,6 +328,7 @@ internal sealed class NativeHudRuntime
 			"settings" => settingsWindow,
 			"history" => historyWindow,
 			"conditions" => conditionWindow,
+			"hidden" => hiddenHuntWindow,
 			_ => null
 		};
 		if (target == null) return false;
@@ -690,6 +695,35 @@ internal sealed class NativeHudRuntime
 		catch (Exception ex) { log("[原生UI] 条件订阅刷新失败："+ex); }
 	}
 
+	internal void TickHiddenHunts(bool open, HiddenHuntSnapshot snapshot)
+	{
+		if (disposed || failed || !InitReady() || (!open && hiddenHuntWindow == null)) return;
+		if ((DateTime.UtcNow - lastHiddenHuntsSyncUtc).TotalMilliseconds < 200) return;
+		lastHiddenHuntsSyncUtc = DateTime.UtcNow;
+		try
+		{
+			hiddenHuntWindow ??= new HiddenHuntWindow(hiddenHuntActions)
+			{
+				InternalName = "MagicBucketNativeHiddenHunts",
+				Title = "魔法水桶 · 已隐藏",
+				Size = new Vector2(400, 380)
+			};
+			if (open && !hiddenHuntWindow.IsOpen) hiddenHuntWindow.Open();
+			else if (!open && hiddenHuntWindow.IsOpen)
+			{
+				hiddenHuntWindow.SuppressClosed = true;
+				try { hiddenHuntWindow.Close(); } finally { hiddenHuntWindow.SuppressClosed = false; }
+			}
+			if (hiddenHuntWindow.IsOpen) hiddenHuntWindow.Apply(snapshot);
+		}
+		catch (Exception ex)
+		{
+			if ((DateTime.UtcNow - lastTickErrorLogUtc).TotalSeconds < 5) return;
+			lastTickErrorLogUtc = DateTime.UtcNow;
+			log("[原生UI] 已隐藏窗口刷新失败：" + ex);
+		}
+	}
+
 	internal void Shutdown()
 	{
 		if (disposed)
@@ -697,6 +731,16 @@ internal sealed class NativeHudRuntime
 			return;
 		}
 		disposed = true;
+		try
+		{
+			if (hiddenHuntWindow != null)
+			{
+				hiddenHuntWindow.SuppressClosed = true;
+				hiddenHuntWindow.Dispose();
+				hiddenHuntWindow = null;
+			}
+		}
+		catch (Exception ex) { log("[原生UI] 已隐藏窗口关闭失败：" + ex.Message); }
 		try { if (conditionWindow != null) { conditionWindow.SuppressClosed=true; conditionWindow.Close(); conditionWindow=null; } } catch (Exception ex) { log("[原生UI] 条件订阅关闭失败："+ex.Message); }
 		try
 		{

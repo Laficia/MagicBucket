@@ -236,6 +236,7 @@ internal sealed class MainWindow : ResponsiveAddon
 	private bool sortAsc = true;
 	private bool showOpenRows = true;
 	private TextButtonNode? bConditions;
+	private TextButtonNode? bHidden, bHideHunt;
 	protected override Vector2 MinimumSize => new(420, 300);
 
 	private bool sortActive;
@@ -497,6 +498,16 @@ internal sealed class MainWindow : ResponsiveAddon
 			fixedRoot.AttachNode(content);
 			attachParent = fixedRoot;
 			bConditions = B(contentStartPosition, 100, 26, "条件订阅", () => actions.OpenConditions());
+			bHidden = B(contentStartPosition, 100, 26, "已隐藏", () => actions.OpenHidden());
+			bHideHunt = B(contentStartPosition, 150, 26, "隐藏该类 S 怪", () =>
+			{
+				string en = expandedKey.Split('\u0001')[0];
+				if (en.Length == 0) return;
+				actions.HideHunt(en);
+				CollapseDetails();
+			});
+			bHideHunt.IsVisible = false;
+			bHideHunt.TextTooltip = "隐藏这类 S 怪的所有服务器条目；可在“已隐藏”里恢复";
 			searchInput = new TextInputNode
 			{
 				Position = contentStartPosition,
@@ -1348,6 +1359,8 @@ internal sealed class MainWindow : ResponsiveAddon
 		}
 		MainHuntRow expanded = ((expandedKey.Length > 0) ? s.Hunts.Find((MainHuntRow x) => string.Equals(x.Key, expandedKey, StringComparison.Ordinal)) : null);
 		bool flag7 = expanded != null && detailOk;
+		if (bHideHunt != null) bHideHunt.IsVisible = flag7;
+		if (bHidden != null) NativeButtonStyle.Apply(bHidden, s.HiddenCount > 0 ? $"已隐藏 {s.HiddenCount}" : "已隐藏", 100, 26, false);
 		try
 		{
 			if (detailLabel != null)
@@ -1536,7 +1549,7 @@ internal sealed class MainWindow : ResponsiveAddon
         if(MathF.Abs(searchInput.Width-searchWidth)>.1f)searchInput.Width=searchWidth;
         bDc.IsVisible = false;
         y = Flow(w, y, searchInput, bClearSearch, bRefresh);
-        y = Flow(w, y, bConditions, bHistory, bSettings);
+        y = Flow(w, y, bConditions, bHistory, bSettings, bHidden);
         bManualHint.IsVisible = s.NeedsManualRefresh;
         if (s.NeedsManualRefresh) { bManualHint.String = s.Fetching ? "公开熊站 · 手动加载中…" : "公开熊站 · 点击“刷新”手动加载"; bManualHint.Fit(w, 11, true); y = Flow(w, y, bManualHint); }
         y = Flow(w, y, dcButtons);
@@ -1588,6 +1601,7 @@ internal sealed class MainWindow : ResponsiveAddon
             }
             y += 28;
             if (hunt.Key != expandedKey || !hunt.Expanded) continue;
+            if (bHideHunt != null && bHideHunt.IsVisible) { bHideHunt.Position = new Vector2(20,y); y += bHideHunt.Height + 6; }
             string tooltip = (ConditionCatalog.Find(hunt.En)?.Method ?? "") + "\n" + hunt.ConditionRange;
             foreach (var text in new[] {detailCond, detailTime, detailRange})
             {
