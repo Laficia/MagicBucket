@@ -159,7 +159,7 @@ internal sealed class NativeHudRuntime
 		}
 	}
 
-	internal void Tick(bool wantOpen, HudSnapshot s)
+	internal void Tick(bool wantOpen, Func<HudSnapshot> snapshot)
 	{
 		if (failed || disposed)
 		{
@@ -194,7 +194,7 @@ internal sealed class NativeHudRuntime
 				}
 				if (window.IsOpen)
 				{
-					window.Apply(s);
+					ApplyMeasured("触发悬浮窗", snapshot, window.Apply);
 				}
 			}
 		}
@@ -208,7 +208,7 @@ internal sealed class NativeHudRuntime
 		}
 	}
 
-	internal void TickAuto(bool wantOpen, AutoWindowSnapshot s)
+	internal void TickAuto(bool wantOpen, Func<AutoWindowSnapshot> snapshot)
 	{
 		if (failed || autoFailed || disposed)
 		{
@@ -243,7 +243,7 @@ internal sealed class NativeHudRuntime
 				}
 				if (autoWindow.IsOpen)
 				{
-					autoWindow.Apply(s);
+					ApplyMeasured("自动前往", snapshot, autoWindow.Apply);
 				}
 			}
 		}
@@ -257,7 +257,7 @@ internal sealed class NativeHudRuntime
 		}
 	}
 
-	internal void TickMain(bool wantOpen, MainSnapshot s)
+	internal void TickMain(bool wantOpen, Func<MainSnapshot> snapshot)
 	{
 		if (failed || mainFailed || disposed)
 		{
@@ -281,7 +281,7 @@ internal sealed class NativeHudRuntime
 				};
 				log("[原生UI] 主窗口原生窗口已就绪");
 			}
-			if ((DateTime.UtcNow - lastMainSyncUtc).TotalMilliseconds < 200.0)
+			if ((DateTime.UtcNow - lastMainSyncUtc).TotalMilliseconds < 350.0)
 			{
 				return;
 			}
@@ -304,7 +304,7 @@ internal sealed class NativeHudRuntime
 			}
 			if (mainWindow.IsOpen)
 			{
-				mainWindow.Apply(s);
+				ApplyMeasured("主窗口", snapshot, mainWindow.Apply);
 			}
 		}
 		catch (Exception value)
@@ -315,6 +315,18 @@ internal sealed class NativeHudRuntime
 				log($"[原生UI] 主窗口本帧刷新异常，已跳过并重试：{value}");
 			}
 		}
+	}
+
+	private void ApplyMeasured<T>(string name, Func<T> snapshot, Action<T> apply)
+	{
+		long start = System.Diagnostics.Stopwatch.GetTimestamp();
+		T data = snapshot();
+		long built = System.Diagnostics.Stopwatch.GetTimestamp();
+		apply(data);
+		double applyMs = System.Diagnostics.Stopwatch.GetElapsedTime(built).TotalMilliseconds;
+		double buildMs = System.Diagnostics.Stopwatch.GetElapsedTime(start, built).TotalMilliseconds;
+		if (buildMs + applyMs >= 25)
+			log($"[原生UI] {name}刷新耗时 {buildMs + applyMs:F1} ms（数据 {buildMs:F1} ms，布局 {applyMs:F1} ms）");
 	}
 
 	internal void ForceMainRefresh()
@@ -501,7 +513,7 @@ internal sealed class NativeHudRuntime
 		}
 	}
 
-	internal void TickSettings(bool wantOpen, SettingsSnapshot s)
+	internal void TickSettings(bool wantOpen, Func<SettingsSnapshot> snapshot)
 	{
 		if (failed || settingsFailed || disposed)
 		{
@@ -550,7 +562,7 @@ internal sealed class NativeHudRuntime
 				lastSettingsSyncUtc = DateTime.UtcNow;
 				if (settingsWindow.IsOpen)
 				{
-					settingsWindow.Apply(s);
+					ApplyMeasured("设置", snapshot, settingsWindow.Apply);
 				}
 			}
 		}
@@ -569,7 +581,7 @@ internal sealed class NativeHudRuntime
 		lastSettingsSyncUtc = DateTime.MinValue;
 	}
 
-	internal void TickHistory(bool wantOpen, HistorySnapshot s)
+	internal void TickHistory(bool wantOpen, Func<HistorySnapshot> snapshot)
 	{
 		if (failed || historyFailed || disposed)
 		{
@@ -618,7 +630,7 @@ internal sealed class NativeHudRuntime
 				lastHistorySyncUtc = DateTime.UtcNow;
 				if (historyWindow.IsOpen)
 				{
-					historyWindow.Apply(s);
+					ApplyMeasured("历史", snapshot, historyWindow.Apply);
 				}
 			}
 		}

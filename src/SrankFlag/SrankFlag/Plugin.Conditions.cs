@@ -91,7 +91,7 @@ public sealed partial class Plugin
 
     private void TickConditionUi()
     {
-        if (nativeHud==null || (DateTime.UtcNow-lastConditionBuildUtc).TotalMilliseconds<250) return;
+        if (nativeHud==null || (DateTime.UtcNow-lastConditionBuildUtc).TotalMilliseconds<1000) return;
         lastConditionBuildUtc=DateTime.UtcNow;
         try
         {

@@ -31,9 +31,9 @@ internal sealed class ThemedTextNode : TextNode
 
     internal void Fit(float width, uint maxFont = 13, bool wrap = false)
     {
-        width = MathF.Max(8, width);
+        width = MathF.Max(8, MathF.Floor(width));
         // Other layout helpers may have changed Width since the previous fit.
-        Width = width;
+        if (Width != width) Width = width;
         if (fittedText == fullText && MathF.Abs(fittedWidth - width) < .5f && fittedFont == maxFont && fittedWrap == wrap) return;
         fittedText = fullText; fittedWidth = width; fittedFont = maxFont; fittedWrap = wrap;
         base.String = fullText;

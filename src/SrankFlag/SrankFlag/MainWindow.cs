@@ -1651,9 +1651,14 @@ internal sealed class MainWindow : ResponsiveAddon
             detailBottom = y;
         }
         status.Fit(w,11,true); status.Position=new Vector2(0,y); y+=status.Height+8;
-        scroll.Position=ContentStartPosition; scroll.Size=new Vector2(BodyWidth,BodyHeight);
-        content.Height=MathF.Max(y,BodyHeight);
-        scroll.RecalculateSizes(); scroll.ScrollBarNode.UpdateScrollParams();
+        scroll.Position = ContentStartPosition;
+        var viewport = new Vector2(MathF.Floor(BodyWidth), MathF.Floor(BodyHeight));
+        float contentHeight = MathF.Ceiling(MathF.Max(y, viewport.Y));
+        bool viewportChanged = scroll.Size != viewport;
+        bool heightChanged = content.Height != contentHeight;
+        if (viewportChanged) scroll.Size = viewport;
+        if (heightChanged) content.Height = contentHeight;
+        if (heightChanged) scroll.RecalculateSizes();
         if (revealDetails && detailTop is { } top)
         {
             float position = scroll.ScrollBarNode.ScrollPosition;

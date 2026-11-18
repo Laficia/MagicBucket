@@ -6474,6 +6474,12 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 	}
 
+	private Func<HudSnapshot>? buildHudSnapshot;
+	private Func<AutoWindowSnapshot>? buildAutoSnapshot;
+	private Func<MainSnapshot>? buildMainSnapshot;
+	private Func<SettingsSnapshot>? buildSettingsSnapshot;
+	private Func<HistorySnapshot>? buildHistorySnapshot;
+
 	private void TickNativeHud()
 	{
 		if (!NativeWindowsReady()) return;
@@ -6486,7 +6492,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 		try
 		{
-			nativeHudRuntime.Tick(autoHudOpen, BuildHudSnapshot());
+			nativeHudRuntime.Tick(autoHudOpen, buildHudSnapshot ??= BuildHudSnapshot);
 		}
 		catch (Exception exception)
 		{
@@ -6503,7 +6509,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 		try
 		{
-			nativeHudRuntime.TickAuto(autoRunOpen, BuildAutoWindowSnapshot());
+			nativeHudRuntime.TickAuto(autoRunOpen, buildAutoSnapshot ??= BuildAutoWindowSnapshot);
 		}
 		catch (Exception exception2)
 		{
@@ -6518,7 +6524,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		try
 		{
 			bool wantOpen = mainWindowOpen;
-			nativeHudRuntime.TickMain(wantOpen, BuildMainSnapshot());
+			nativeHudRuntime.TickMain(wantOpen, buildMainSnapshot ??= BuildMainSnapshot);
 		}
 		catch (Exception exception3)
 		{
@@ -6532,7 +6538,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 		try
 		{
-			nativeHudRuntime.TickSettings(settingsWindowOpen, BuildSettingsSnapshot());
+			nativeHudRuntime.TickSettings(settingsWindowOpen, buildSettingsSnapshot ??= BuildSettingsSnapshot);
 		}
 		catch (Exception exception4)
 		{
@@ -6546,7 +6552,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 		try
 		{
-			nativeHudRuntime.TickHistory(historyWindowOpen, BuildHistorySnapshot());
+			nativeHudRuntime.TickHistory(historyWindowOpen, buildHistorySnapshot ??= BuildHistorySnapshot);
 		}
 		catch (Exception exception5)
 		{
@@ -6873,6 +6879,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			Expand = (string k) =>
 			{
 				mainExpandedKey = k ?? "";
+				nativeHud?.ForceMainRefresh();
 			},
 			SelectHuntWorld = (string en, string w) =>
 			{
