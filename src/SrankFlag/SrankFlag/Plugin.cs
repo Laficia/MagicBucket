@@ -176,7 +176,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private readonly record struct HuntPrep(PrepKind Kind, string Arg);
 
-	private readonly record struct AetheryteHit(string Name, float X, float Y, double Dist);
+	private readonly record struct AetheryteHit(string Name, float X, float Y, double Dist, uint Id = 0, uint Territory = 0);
 
 	private readonly record struct DiscardResult(bool Ok, string Message);
 
@@ -1480,7 +1480,8 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				GotoResult gotoResult = Goto(job.Map, pt.X, pt.Y, job.World, HuntLineOverride(job.HuntEn, job.World), job.HuntCn, nav: true, greens);
 				if (!gotoResult.Ok)
 				{
-					Print("[自动前往] 前往失败：" + gotoResult.Message);
+					AbortTravel(gotoResult.Message);
+					return;
 				}
 			}
 			else
@@ -1488,13 +1489,15 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				GotoResult gotoResult2 = GotoAetheryte(job.Map, job.World, job.HuntCn);
 				if (!gotoResult2.Ok)
 				{
-					Print("[自动前往] 前往大水晶失败：" + gotoResult2.Message);
+					AbortTravel(gotoResult2.Message);
+					return;
 				}
 			}
 		}
 		catch (Exception ex)
 		{
-			Print("[自动前往] 出发出错：" + ex.Message);
+			AbortTravel("出发出错：" + ex.Message);
+			return;
 		}
 		autoJobStart = DateTime.UtcNow;
 		autoTravelAt = autoJobStart;
@@ -1539,7 +1542,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				}
 				try
 				{
-					if (((greens.Count > 0) & flag) && TryResolveZone(job.Map, out uint _, out uint mapId, out string _))
+					if (!travelPreparationPending && flag && flag2 && !IsZoning() && greens.Count > 0 && TryResolveZone(job.Map, out uint _, out uint mapId, out string _))
 					{
 						float num = YalmsTo(mapId, greens[0].X, greens[0].Y);
 						autoDist = num;
@@ -1549,7 +1552,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 							return;
 						}
 					}
-					else if ((greens.Count == 0) & flag & flag2)
+					else if (!travelPreparationPending && !IsZoning() && greens.Count == 0 && flag && flag2)
 					{
 						autoDist = 0f;
 						AutoBeginWait(job, token);
@@ -1626,13 +1629,13 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private void AutoMaybeRetryRoute(AutoJob job, List<Pt> greens)
 	{
-		if (autoRetriedRoute || autoRouteStartedAt != default(DateTime) || !QuickActionHunts.Contains(job.HuntCn) || greens.Count == 0 || autoJobStart == default(DateTime) || (DateTime.UtcNow - autoJobStart).TotalSeconds < 30.0)
+		if (travelPreparationPending || autoRetriedRoute || autoRouteStartedAt != default(DateTime) || !QuickActionHunts.Contains(job.HuntCn) || greens.Count == 0 || autoJobStart == default(DateTime) || (DateTime.UtcNow - autoJobStart).TotalSeconds < 30.0)
 		{
 			return;
 		}
 		try
 		{
-			if (!InMap(job.Map))
+			if (!AtTravelDestination(job.World, job.Map))
 			{
 				return;
 			}
@@ -1656,7 +1659,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			AetheryteHit? aetheryteHit = NearestAetheryte(job.Map, x, y, job.HuntCn);
 			if (aetheryteHit.HasValue)
 			{
-				Say("/pdrtelepo " + aetheryteHit.GetValueOrDefault().Name);
+				TryNativeTeleport(aetheryteHit.GetValueOrDefault(), out _);
 			}
 		}
 		catch
@@ -3298,6 +3301,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 	private GotoResult Goto(string map, float x, float y, string world, int line, string huntCn = "", bool nav = false, List<Pt>? route = null)
 	{
 		CaptureWindowStateBeforeTeleport();
+		StopAll(quiet: true);
 		Resume();
 		FlagResult flagResult = Flag(map, x, y);
 		if (!flagResult.Ok)
@@ -3305,15 +3309,16 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			return new GotoResult(Ok: false, flagResult.Message);
 		}
 		AetheryteHit? ae = ((route == null || route.Count <= 0 || HuntAetheryte.ContainsKey(huntCn)) ? NearestAetheryte(map, x, y, huntCn) : (AetheryteForRoute(map, route) ?? NearestAetheryte(map, x, y, huntCn)));
+		if(!ae.HasValue)return new GotoResult(false,"在「"+map+"」找不到已解锁的大水晶");
+		travelPreparationPending = true;
 		bool flag = !string.IsNullOrWhiteSpace(world) && !string.Equals(CurrentWorldName(), world, StringComparison.OrdinalIgnoreCase);
-		bool alreadyIn = InMap(map);
 		if (flag)
 		{
 			SendWorldTravel(world);
 			WaitUntilOr(() => !condition[ConditionFlag.BetweenAreas] && string.Equals(CurrentWorldName(), world, StringComparison.OrdinalIgnoreCase), Teleport, () =>
 			{
-				Print("[跨服] 240 秒还没到 " + world + "，这次跨服放弃");
-			}, 240);
+				AbortTravel("跨服超时，未到达 " + world);
+			}, 480);
 		}
 		else
 		{
@@ -3323,12 +3328,12 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			}
 			Sched(Teleport, TimeSpan.FromMilliseconds(250L));
 		}
-		return new GotoResult(Ok: true, (flag ? "已跨服 + 开图插旗，落地即传送" : "已开图插旗 + 立即传送") + ((!ae.HasValue) ? "（未找到最近水晶）" : ("（最近水晶：" + ae.GetValueOrDefault().Name + "）")) + (nav ? "，落地先做准备再飞向绿点" : ""));
+		return new GotoResult(true, "已发起前往"+(flag?" "+world:"")+" · "+map+"（"+ae.Value.Name+"），确认落地后再执行后续动作");
 		void Arrived()
 		{
 			WaitCorrectWorldThen(world, huntCn, () =>
 			{
-				RunPrepThen(huntCn, () =>
+				RunPrepAtDestination(huntCn, world, map, () =>
 				{
 					if (line > 0)
 					{
@@ -3356,23 +3361,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 		void Teleport()
 		{
-			if (ae.HasValue)
-			{
-				AetheryteHit valueOrDefault = ae.GetValueOrDefault();
-				Say("/pdrtelepo " + valueOrDefault.Name);
-			}
-			if (alreadyIn)
-			{
-				Sched(Arrived, TimeSpan.FromMilliseconds(3000L));
-			}
-			else
-			{
-				WaitUntilOr(() => InMap(map), Arrived, () =>
-				{
-					Print("[前往] 等了 120 秒还没确认落地到「" + map + "」，仍继续触发动作");
-					Arrived();
-				}, 240);
-			}
+			TeleportConfirmed(ae.Value,map,world,Arrived);
 		}
 	}
 
@@ -3470,20 +3459,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						{
 							(string Name, float X, float Y, float Dist) a2 = near.Value;
 							Print($"[{huntCn}] {g.Id} 号点离「{a2.Name}」{a2.Dist:F0} 亚尔（从这儿飞要 {curD:F0} 亚尔），先传大水晶");
-							Say("/pdrtelepo " + a2.Name);
-							WaitUntilOr(() =>
-							{
-								if (!condition[ConditionFlag.BetweenAreas])
-								{
-									(float, float)? tuple = PlayerMapCoords(mapId);
-									if (tuple.HasValue)
-									{
-										(float, float) valueOrDefault = tuple.GetValueOrDefault();
-										return YalmsBetween((int)sizeFactor, valueOrDefault.Item1, valueOrDefault.Item2, a2.X, a2.Y) <= 30f;
-									}
-								}
-								return false;
-							}, Fly, Fly, 80, 250);
+							TeleportConfirmed(new AetheryteHit(a2.Name, a2.X, a2.Y, a2.Dist), map, CurrentWorldName(), Fly);
 						}
 					}, TimeSpan.FromMilliseconds(600L));
 				}
@@ -3940,6 +3916,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private void CraftViaArtisan(ushort recipeId, uint itemId, int amount, string tag, System.Action then)
 	{
+		if(!EnsurePreparationLocation())return;
 		int hqBefore;
 		int gen;
 		try
@@ -3966,10 +3943,12 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				{
 					try
 					{
+						ownsArtisanCraft=true;
 						craftSub.InvokeAction(recipeId, amount);
 					}
 					catch (Exception ex2)
 					{
+						ownsArtisanCraft=false;
 						Print(tag + " Artisan 调用失败：" + ex2.Message + "，请手动制作");
 						then();
 						return;
@@ -4001,6 +3980,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 							}
 							if (left <= 0)
 							{
+								ownsArtisanCraft = false;
 								ArtisanSetEndurance(on: false);
 								Print(tag + " Artisan 20 秒内没开始制作（材料不够/没启用？），请手动制作");
 								then();
@@ -4011,6 +3991,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						{
 							if (!flag)
 							{
+								ownsArtisanCraft=false;
 								ArtisanSetEndurance(on: false);
 								int num = HqItemCount(itemId);
 								Print($"{tag} Artisan 制作结束：背包 HQ {hqBefore} → {num}" + ((num > hqBefore) ? "，HQ 已做出 ✓" : "（没做出 HQ，请检查材料）"));
@@ -4019,6 +4000,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 							}
 							if (left <= 0)
 							{
+								ownsArtisanCraft = false;
 								ArtisanSetEndurance(on: false);
 								Print(tag + " Artisan 制作超过 10 分钟没结束，请手动检查");
 								then();
@@ -4028,6 +4010,8 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 					}
 					catch (Exception ex2)
 					{
+						if (ownsArtisanCraft) ArtisanSetEndurance(false);
+						ownsArtisanCraft = false;
 						Print(tag + " 等 Artisan 出错：" + ex2.Message + "，请手动制作");
 						then();
 						return;
@@ -5077,7 +5061,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 					wasDead = true;
 					ClickYesNo("SelectYesno");
 				}
-				else if (wasDead && !condition[ConditionFlag.BetweenAreas])
+				else if (wasDead && !IsZoning())
 				{
 					if (!InMap(map))
 					{
@@ -5086,21 +5070,15 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 						{
 							AetheryteHit valueOrDefault = aetheryteHit.GetValueOrDefault();
 							Print($"[{huntCn}] 复活后不在「{map}」——不用改返回点，直接传本图大水晶，继续下一个绿点");
-							Say("/pdrtelepo " + valueOrDefault.Name);
-							WaitUntilOr(() => InMap(map) && !condition[ConditionFlag.BetweenAreas], () =>
+							TeleportConfirmed(valueOrDefault, map, CurrentWorldName(), () =>
 							{
 								Print($"[{huntCn}] 已传回「{map}」大水晶，继续下一个绿点");
-								then();
-							}, () =>
-							{
-								Print("[" + huntCn + "] 传回大水晶没确认落地，仍继续下一个绿点");
 								then();
 							});
 						}
 						else
 						{
-							Print($"[{huntCn}] 复活后不在「{map}」，本图也没找到大水晶，直接继续下一个绿点");
-							then();
+							AbortTravel($"复活后不在「{map}」，找不到已解锁的大水晶");
 						}
 					}
 					else
@@ -5120,8 +5098,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			}
 			else
 			{
-				Print("[" + huntCn + "] 等复活超时，继续下一个点");
-				then();
+				AbortTravel("等待复活超时：" + huntCn);
 			}
 		}
 	}
@@ -5225,7 +5202,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			return;
 		}
 		int ticks = 0;
-		bool teleported = false;
 		Sched(Tick, TimeSpan.FromMilliseconds(200L));
 		void Tick()
 		{
@@ -5235,7 +5211,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			try
 			{
 				flag = InMap(map);
-				flag2 = condition[ConditionFlag.BetweenAreas] || condition[ConditionFlag.BoundByDuty];
+				flag2 = IsZoning() || condition[ConditionFlag.BoundByDuty];
 				flag3 = !flag2 && !Dead() && (Mounted() || CanMountNow());
 			}
 			catch
@@ -5248,21 +5224,21 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			}
 			else
 			{
-				if (!teleported && !flag && !flag2 && ticks >= 4)
+				if (!flag && !flag2 && ticks >= 4)
 				{
 					AetheryteHit? aetheryteHit = NearestAetheryte(map, 0f, 0f, huntCn);
 					if (aetheryteHit.HasValue)
 					{
 						AetheryteHit valueOrDefault = aetheryteHit.GetValueOrDefault();
 						Print($"[{huntCn}] 退本后不在「{map}」，直接传本图大水晶（不用改返回点）");
-						Say("/pdrtelepo " + valueOrDefault.Name);
-						teleported = true;
+						TeleportConfirmed(valueOrDefault, map, CurrentWorldName(), then);
 					}
+					else AbortTravel("退本后找不到已解锁的大水晶：" + map);
+					return;
 				}
 				if (++ticks > 60)
 				{
-					Print("[" + huntCn + "] 退本后没等到完全就绪，仍继续下一个触发点");
-					then();
+					AbortTravel("退本后未就绪：" + huntCn);
 				}
 				else
 				{
@@ -5415,13 +5391,13 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			UIState* ptr = UIState.Instance();
 			if (ptr == null)
 			{
-				return true;
+				return false;
 			}
 			return ptr->IsAetheryteUnlocked(aetheryteId);
 		}
 		catch
 		{
-			return true;
+			return false;
 		}
 	}
 
@@ -5554,17 +5530,19 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 	private GotoResult GotoAetheryte(string map, string world, string huntCn = "")
 	{
 		CaptureWindowStateBeforeTeleport();
+		StopAll(quiet: true);
 		Resume();
 		AetheryteHit? ae = NearestAetheryte(map, 0f, 0f, huntCn);
+		if(!ae.HasValue)return new GotoResult(false,"在「"+map+"」找不到已解锁的大水晶");
+		travelPreparationPending = true;
 		bool flag = !string.IsNullOrWhiteSpace(world) && !string.Equals(CurrentWorldName(), world, StringComparison.OrdinalIgnoreCase);
-		bool alreadyIn = InMap(map);
 		if (flag)
 		{
 			SendWorldTravel(world);
 			WaitUntilOr(() => !condition[ConditionFlag.BetweenAreas] && string.Equals(CurrentWorldName(), world, StringComparison.OrdinalIgnoreCase), Teleport, () =>
 			{
-				Print("[跨服] 240 秒还没到 " + world + "，这次跨服放弃");
-			}, 240);
+				AbortTravel("跨服超时，未到达 " + world);
+			}, 480);
 		}
 		else
 		{
@@ -5574,23 +5552,12 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			}
 			Sched(Teleport, TimeSpan.FromMilliseconds(250L));
 		}
-		bool hasValue = ae.HasValue;
-		string message;
-		if (ae.HasValue)
-		{
-			AetheryteHit valueOrDefault = ae.GetValueOrDefault();
-			message = (flag ? ("已跨服到 " + world + "，") : "") + "落地即传大水晶：" + valueOrDefault.Name;
-		}
-		else
-		{
-			message = "在「" + map + "」找不到大水晶";
-		}
-		return new GotoResult(hasValue, message);
+		return new GotoResult(true, "已发起前往" + (flag ? " " + world : "") + " · " + map + "（" + ae.Value.Name + "），确认落地后再执行后续动作");
 		void Arrived()
 		{
 			WaitCorrectWorldThen(world, huntCn, () =>
 			{
-				RunPrepThen(huntCn, () =>
+				RunPrepAtDestination(huntCn, world, map, () =>
 				{
 					if (huntCn == "牛头黑神")
 					{
@@ -5617,23 +5584,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 		void Teleport()
 		{
-			if (ae.HasValue)
-			{
-				AetheryteHit valueOrDefault2 = ae.GetValueOrDefault();
-				Say("/pdrtelepo " + valueOrDefault2.Name);
-			}
-			if (alreadyIn)
-			{
-				Sched(Arrived, TimeSpan.FromMilliseconds(3000L));
-			}
-			else
-			{
-				WaitUntilOr(() => InMap(map), Arrived, () =>
-				{
-					Print("[前往] 等了 120 秒还没确认落地到「" + map + "」，仍继续触发动作");
-					Arrived();
-				}, 240);
-			}
+			TeleportConfirmed(ae.Value,map,world,Arrived);
 		}
 	}
 
@@ -5645,7 +5596,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 		try
 		{
-			return !condition[ConditionFlag.BetweenAreas] && string.Equals(CurrentWorldName(), world, StringComparison.OrdinalIgnoreCase);
+			return !IsZoning() && objectTable.LocalPlayer != null && string.Equals(CurrentWorldName(), world, StringComparison.OrdinalIgnoreCase);
 		}
 		catch
 		{
@@ -6154,12 +6105,14 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private FlagResult TeleportNearest(string map, float x, float y)
 	{
+		StopAll(quiet:true);
+		Resume();
 		AetheryteHit? aetheryteHit = NearestAetheryte(map, x, y);
 		if (aetheryteHit.HasValue)
 		{
 			AetheryteHit valueOrDefault = aetheryteHit.GetValueOrDefault();
-			Say("/pdrtelepo " + valueOrDefault.Name);
-			return new FlagResult(Ok: true, "已传最近大水晶：" + valueOrDefault.Name);
+			bool accepted=TryNativeTeleport(valueOrDefault,out string reason);
+			return new FlagResult(accepted,accepted?"已发起原生传送："+valueOrDefault.Name:reason);
 		}
 		return new FlagResult(Ok: false, "在「" + map + "」找不到大水晶");
 	}
@@ -6228,14 +6181,14 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		AetheryteHit? result = null;
 		foreach (Lumina.Excel.Sheets.Aetheryte item2 in excelSheet2)
 		{
-			if (item2.Map.RowId != num || !item2.IsAetheryte)
+			if (item2.Map.RowId != num || !item2.IsAetheryte || !AetheryteUnlocked(item2.RowId))
 			{
 				continue;
 			}
 			string text2 = SafePlaceNameFrom(item2);
 			if (!string.IsNullOrEmpty(text2))
 			{
-				AetheryteHit aetheryteHit = new AetheryteHit(text2, x, y, 0.0);
+				AetheryteHit aetheryteHit = new AetheryteHit(text2, x, y, 0.0, item2.RowId, item2.Territory.RowId);
 				if (array.Length == 0)
 				{
 					return aetheryteHit;
@@ -6394,7 +6347,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		return new FlagResult(Ok: true, result.Message + "，" + (flag ? "跨服落地后" : "马上") + "上坐骑 + 自动飞行寻路（/vnav flyflag）", result.TerritoryId, result.MapId);
 		void StartNav()
 		{
-			RunPrepThen(huntCn, () =>
+			RunPrepAtDestination(huntCn, world, mapName, () =>
 			{
 				FlyFlagThen(() =>
 				{
@@ -10444,6 +10397,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			{
 				return;
 			}
+			if(!EnsurePreparationLocation())return;
 			try
 			{
 				act();
@@ -10457,6 +10411,13 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private void StopAll(bool quiet = false)
 	{
+		preparationLocationGuard=null;
+		travelPreparationPending=false;
+		if(ownsArtisanCraft){ArtisanSetEndurance(false);ownsArtisanCraft=false;}
+		if(!quiet)
+		{
+			autoRunning=false;autoPaused=false;autoPauseReason="";autoGen++;autoToken++;autoJob=null;autoHit="";autoStatus="已停止";
+		}
 		halted = true;
 		runGen++;
 		Say("/vnav stop", force: true);
@@ -10497,13 +10458,14 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		{
 			return;
 		}
+		int generation = runGen;
 		try
 		{
 			framework.RunOnFrameworkThread(() =>
 			{
 				try
 				{
-					if (halted && !force)
+					if (!force && (halted || generation != runGen || !EnsurePreparationLocation()))
 					{
 						log.Debug("[SrankFlag] 已停止，丢弃命令：" + text);
 					}

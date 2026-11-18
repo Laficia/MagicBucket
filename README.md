@@ -1,6 +1,6 @@
 # 魔法水桶：本地源码恢复版本
 
-当前版本 `1.2.14.3`，基于 [MiSaKaQAQ/MagicBucket v1.2.13](https://github.com/MiSaKaQAQ/MagicBucket/releases/tag/v1.2.13) 发布包恢复。上游 Git 仓库只有安装索引，没有公开 C# 源码；`src/SrankFlag` 是通过 ILSpy 11.2.0.10050 反编译 DLL 后修复编译问题的代码，不是作者原始工程。原作者信息 `hunhuan` 保留在插件清单中。
+当前版本 `1.2.14.4`，基于 [MiSaKaQAQ/MagicBucket v1.2.13](https://github.com/MiSaKaQAQ/MagicBucket/releases/tag/v1.2.13) 发布包恢复。上游 Git 仓库只有安装索引，没有公开 C# 源码；`src/SrankFlag` 是通过 ILSpy 11.2.0.10050 反编译 DLL 后修复编译问题的代码，不是作者原始工程。原作者信息 `hunhuan` 保留在插件清单中。
 
 ## 原生样式与手动数据加载
 
@@ -13,6 +13,13 @@
 - 手动刷新在游戏聊天栏提示开始与完成、有效记录数；部分失败、超时、切区取消有独立提示。自动更新只刷新状态栏。
 - 三大区优先直连公开熊站 `/api/lastDeathTimers` 批量读取整区：首次建立匿名会话后一次取回 329～376 个组合，后续刷新复用会话；仅补查缺失项。批量接口不可用时，逐条查询最多并发 4 个、每个最长 8 秒，遇到限流停止，避免持续重试。完成提示包含实际耗时。
 - 公开熊站返回的 `Canceled` 同时支持数字与布尔标记；手动加载可纠正旧撤销记录导致的错误时间，同时保留更新的 Sonar 击杀。新缓存保存纠正后的时间，包括无有效记录的情况。
+
+## 原生传送与落地确认
+
+- 大水晶使用游戏原生传送，按已解锁 ID 调用；跨服仍使用 DailyRoutines 的跨界传送模块。
+- 确认目标服务器、地图及过图稳定后才开始准备。同图传送必须实际过图；传送拒绝、未解锁、超时会停止后续制作、采集与触发。
+- 准备期间持续核对所在地；停止命令清除队列及旧命令，只关闭水桶发起的 Artisan 连续制作。
+- 传送回归检查：dotnet run --project tests/TravelChecks -c Release。
 
 ## 本地增强
 
@@ -43,7 +50,7 @@
 
 游戏内使用 `/水桶` 或 `/srankflag` 开关主窗口；`/水桶 settings` 打开设置。插件名称为“魔法水桶”，本地加载时在开发插件列表管理。
 
-运行 `./build-release.ps1` 生成 `artifacts/release/v1.2.14.3/SrankFlag.zip` 和 SHA256 校验文件。发布脚本只打包明确列出的程序集、初始狩猎数据和许可证，不包含本地偏好、缓存或订阅设置。正式发布说明见 [release-notes.zh-CN.md](release-notes.zh-CN.md)。
+运行 `./build-release.ps1` 生成 `artifacts/release/v1.2.14.4/SrankFlag.zip` 和 SHA256 校验文件。发布脚本只打包明确列出的程序集、初始狩猎数据和许可证，不包含本地偏好、缓存或订阅设置。正式发布说明见 [release-notes.zh-CN.md](release-notes.zh-CN.md)。
 
 ## 恢复范围
 
