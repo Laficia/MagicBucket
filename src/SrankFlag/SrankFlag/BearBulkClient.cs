@@ -13,6 +13,12 @@ namespace SrankFlag;
 
 internal readonly record struct BearTimer(double Timestamp, bool Maintenance);
 
+internal sealed class BearTraffic
+{
+    internal int SessionRequests, TimerRequests, UploadBytes, DecodedBytes;
+    internal TimeSpan? RetryAfter;
+}
+
 // The public Bear website requests all selected worlds through this endpoint.
 // This client creates its own anonymous CSRF session; it never uses browser login.
 internal sealed class BearBulkClient : IDisposable
@@ -43,41 +49,34 @@ internal sealed class BearBulkClient : IDisposable
     }
 
     internal async Task<Dictionary<string, BearTimer>> FetchAsync(
-        IReadOnlyCollection<string> hunts, IReadOnlyCollection<string> worlds, CancellationToken token)
+        IReadOnlyCollection<string> hunts, IReadOnlyCollection<string> worlds, CancellationToken token, BearTraffic? traffic = null)
     {
         if (hunts.Count == 0 || worlds.Count == 0) return new(StringComparer.Ordinal);
         var knownHunts = hunts.ToHashSet(StringComparer.Ordinal);
         var knownWorlds = worlds.ToHashSet(StringComparer.Ordinal);
         string body = JsonSerializer.Serialize(new { QueryDeathTimers = worlds, RankType = "sRank" });
-        for (int attempt = 0; attempt < 2; attempt++)
-        {
-            await EnsureSessionAsync(token).ConfigureAwait(false);
-            using var request = new HttpRequestMessage(HttpMethod.Post, "api/lastDeathTimers");
-            request.Headers.Add("X-CSRFToken", csrfToken!);
-            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-            using var response = await http.SendAsync(request, token).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.Forbidden && attempt == 0)
-            {
-                csrfToken = null;
-                continue;
-            }
-            response.EnsureSuccessStatusCode();
-            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token).ConfigureAwait(false));
-            return Parse(document.RootElement, knownHunts, knownWorlds);
-        }
-        throw new HttpRequestException("公开熊站匿名会话已失效");
+        await EnsureSessionAsync(token, traffic).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/lastDeathTimers");
+        request.Headers.Add("X-CSRFToken", csrfToken!);
+        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        if (traffic != null) { traffic.TimerRequests++; traffic.UploadBytes += Encoding.UTF8.GetByteCount(body); }
+        using var response = await http.SendAsync(request, token).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.Forbidden) csrfToken = null;
+        byte[] bytes = await ReadBody(response, token, traffic).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(bytes);
+        return Parse(document.RootElement, knownHunts, knownWorlds);
     }
 
-    private async Task EnsureSessionAsync(CancellationToken token)
+    private async Task EnsureSessionAsync(CancellationToken token, BearTraffic? traffic)
     {
         if (csrfToken is not null) return;
         await sessionGate.WaitAsync(token).ConfigureAwait(false);
         try
         {
             if (csrfToken is not null) return;
+            if (traffic != null) traffic.SessionRequests++;
             using var response = await http.GetAsync("", token).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            string html = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+            string html = Encoding.UTF8.GetString(await ReadBody(response, token, traffic).ConfigureAwait(false));
             var match = Regex.Match(html,
                 """<input\b(?=[^>]*\bname\s*=\s*["']csrfmiddlewaretoken["'])(?=[^>]*\bvalue\s*=\s*["'](?<token>[^"']+)["'])[^>]*>""",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
@@ -85,6 +84,19 @@ internal sealed class BearBulkClient : IDisposable
             csrfToken = WebUtility.HtmlDecode(match.Groups["token"].Value);
         }
         finally { sessionGate.Release(); }
+    }
+
+    private static async Task<byte[]> ReadBody(HttpResponseMessage response, CancellationToken token, BearTraffic? traffic)
+    {
+        if (traffic != null)
+        {
+            var retry = response.Headers.RetryAfter;
+            traffic.RetryAfter = retry?.Delta ?? (retry?.Date is { } date ? date - DateTimeOffset.UtcNow : null);
+        }
+        byte[] bytes = await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
+        if (traffic != null) traffic.DecodedBytes += bytes.Length;
+        response.EnsureSuccessStatusCode();
+        return bytes;
     }
 
     internal static Dictionary<string, BearTimer> Parse(JsonElement root,

@@ -5,6 +5,13 @@ namespace SrankFlag;
 
 internal static class BearRefreshPolicy
 {
+    internal static readonly TimeSpan PublicGlobalInterval = TimeSpan.FromMinutes(1);
+    internal static readonly TimeSpan PublicDcInterval = TimeSpan.FromMinutes(5);
+    internal static readonly TimeSpan PublicFailureInterval = TimeSpan.FromMinutes(5);
+
+    internal static DateTime NextPublicRefresh(DateTime global, DateTime dc, DateTime failureUntil)
+        => new(Math.Max(failureUntil.Ticks, Math.Max((global + PublicGlobalInterval).Ticks, (dc + PublicDcInterval).Ticks)), DateTimeKind.Utc);
+
     internal static bool UsesMainSite(string dc)=>string.Equals(dc,"豆豆柴",StringComparison.Ordinal);
     internal static bool CanStart(string dc,bool manual,TimeSpan sinceLastFetch)
         => (manual||UsesMainSite(dc))&&sinceLastFetch>=(manual?TimeSpan.FromSeconds(10):TimeSpan.FromMinutes(15));

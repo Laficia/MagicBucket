@@ -19,7 +19,8 @@ internal sealed class ConditionWorld
 }
 internal sealed class ConditionEntry
 {
-    internal string En = "", Name = "", Method = "", Timer = "", Rule = "";
+    internal string En = "", Name = "", Method = "", Timer = "", Rule = "", PinnedWorld = "";
+    internal string Key => PinnedWorld.Length == 0 ? En : En + "\u0001" + PinnedWorld;
     internal bool Subscribed;
     internal ConditionPhase Phase;
     internal double Seconds;

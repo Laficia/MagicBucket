@@ -32,11 +32,16 @@ using (var handler = new FakeHandler(async (request, token) =>
 using (var http = new HttpClient(handler))
 using (var client = new BearBulkClient(http))
 {
-    var first = await client.FetchAsync(hunts, worlds, default);
+    var traffic = new BearTraffic();
+    var first = await client.FetchAsync(hunts, worlds, default, traffic);
+    Check(traffic.SessionRequests == 1 && traffic.TimerRequests == 1 && traffic.UploadBytes > 0 &&
+        traffic.DecodedBytes == Encoding.UTF8.GetByteCount(html) + Encoding.UTF8.GetByteCount(payload), "Cold refresh traffic was not measured");
     Check(first.Count == 2, "Unrelated worlds or SS minions entered the S list");
     Check(first["The Garlok|白银乡"] == new BearTimer(200, false), "A newer kill retained old maintenance");
     Check(first["Nandi|白银乡"].Timestamp == 0, "Explicit unknown record was dropped");
-    await client.FetchAsync(hunts, worlds, default);
+    var warm = new BearTraffic();
+    await client.FetchAsync(hunts, worlds, default, warm);
+    Check(warm.SessionRequests == 0 && warm.TimerRequests == 1 && warm.DecodedBytes == Encoding.UTF8.GetByteCount(payload), "Warm refresh fetched more than a batch");
     Check(handler.GetCount == 1 && handler.PostCount == 2, "Refresh did not reuse its anonymous session");
 }
 
@@ -54,16 +59,23 @@ using (var http = new HttpClient(handler))
 using (var client = new BearBulkClient(http))
 {
     await Throws<HttpRequestException>(() => client.FetchAsync(hunts, worlds, default));
-    Check(handler.GetCount == 2 && handler.PostCount == 2, "Forbidden response caused an unbounded session retry");
+    Check(handler.GetCount == 1 && handler.PostCount == 1, "Forbidden response resent requests in the same refresh");
 }
 
-using (var handler = new FakeHandler((request, _) => Task.FromResult(
-    request.Method == HttpMethod.Get ? Response(html) : Response("", HttpStatusCode.TooManyRequests))))
+using (var handler = new FakeHandler((request, _) =>
+{
+    if (request.Method == HttpMethod.Get) return Task.FromResult(Response(html));
+    var response = Response("rate limited", HttpStatusCode.TooManyRequests);
+    response.Headers.RetryAfter = new(TimeSpan.FromMinutes(12));
+    return Task.FromResult(response);
+}))
 using (var http = new HttpClient(handler))
 using (var client = new BearBulkClient(http))
 {
-    await Throws<HttpRequestException>(() => client.FetchAsync(hunts, worlds, default));
+    var traffic = new BearTraffic();
+    await Throws<HttpRequestException>(() => client.FetchAsync(hunts, worlds, default, traffic));
     Check(handler.PostCount == 1, "Rate limit was retried immediately");
+    Check(traffic.RetryAfter == TimeSpan.FromMinutes(12), "Retry-After was discarded");
 }
 
 using (var handler = new FakeHandler(async (_, token) => { await Task.Delay(Timeout.Infinite, token); return Response(""); }))
@@ -75,7 +87,11 @@ using (var cancel = new CancellationTokenSource(25))
     Check(handler.PostCount == 0, "Canceled DC switch continued loading");
 }
 
-Console.WriteLine($"PASS: {checks} checks for batch contract, completeness, session reuse, cancellation and bounded errors.");
+var now = new DateTime(2026, 11, 18, 3, 0, 0, DateTimeKind.Utc);
+Check(BearRefreshPolicy.NextPublicRefresh(now, DateTime.MinValue, DateTime.MinValue) == now.AddMinutes(1), "Switching regions bypassed the global limit");
+Check(BearRefreshPolicy.NextPublicRefresh(now, now, DateTime.MinValue) == now.AddMinutes(5), "Same region allowed a premature refresh");
+Check(BearRefreshPolicy.NextPublicRefresh(now, now, now.AddMinutes(12)) == now.AddMinutes(12), "Retry-After did not take priority");
+Console.WriteLine($"PASS: {checks} checks for batch contract, completeness, traffic, session reuse, cancellation and retry limits.");
 
 if (args.Contains("--live"))
 {

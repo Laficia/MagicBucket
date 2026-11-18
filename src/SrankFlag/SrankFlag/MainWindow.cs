@@ -236,7 +236,8 @@ internal sealed class MainWindow : ResponsiveAddon
 	private bool sortAsc = true;
 	private bool showOpenRows = true;
 	private TextButtonNode? bConditions;
-	private TextButtonNode? bHidden, bHideHunt, bWatch;
+	private TextButtonNode? bHidden, bHideHunt, bWatch, bWatchHunt;
+	private bool revealDetails;
 	protected override Vector2 MinimumSize => new(420, 300);
 
 	private bool sortActive;
@@ -509,6 +510,12 @@ internal sealed class MainWindow : ResponsiveAddon
 			});
 			bHideHunt.IsVisible = false;
 			bHideHunt.TextTooltip = "隐藏这类 S 怪的所有服务器条目；可在“已隐藏”里恢复";
+			bWatchHunt = B(contentStartPosition, 150, 26, "加入悬浮窗", () =>
+			{
+				var pair = expandedKey.Split('\u0001', 2);
+				if (pair.Length == 2) actions.ToggleWatch(pair[0], pair[1]);
+			});
+			bWatchHunt.IsVisible = false;
 			searchInput = new TextInputNode
 			{
 				Position = contentStartPosition,
@@ -965,6 +972,7 @@ internal sealed class MainWindow : ResponsiveAddon
 			{
 				selectedKey = text;
 				expandedKey = (string.Equals(expandedKey, text, StringComparison.Ordinal) ? "" : text);
+				revealDetails = expandedKey.Length > 0;
 				actions.Expand(expandedKey);
 			}
 		}
@@ -973,6 +981,7 @@ internal sealed class MainWindow : ResponsiveAddon
 	internal void ShowDetails(string key)
 	{
 		selectedKey = expandedKey = key;
+		revealDetails = true;
 		actions.Expand(key);
 	}
 
@@ -1359,8 +1368,17 @@ internal sealed class MainWindow : ResponsiveAddon
 			BuildDetail();
 		}
 		MainHuntRow expanded = ((expandedKey.Length > 0) ? s.Hunts.Find((MainHuntRow x) => string.Equals(x.Key, expandedKey, StringComparison.Ordinal)) : null);
-		bool flag7 = expanded != null && detailOk;
+		bool flag7 = expanded is { Expanded: true } && detailOk;
 		if (bHideHunt != null) bHideHunt.IsVisible = flag7;
+		if (bWatchHunt != null)
+		{
+			bWatchHunt.IsVisible = flag7;
+			if (expanded != null)
+			{
+				NativeButtonStyle.Apply(bWatchHunt, expanded.Watched ? "移出悬浮窗" : "加入悬浮窗", 160, 26, false);
+				bWatchHunt.TextTooltip = expanded.World + " · " + expanded.Cn;
+			}
+		}
 		if (bHidden != null) NativeButtonStyle.Apply(bHidden, s.HiddenCount > 0 ? $"已隐藏 {s.HiddenCount}" : "已隐藏", 100, 26, false);
 		try
 		{
@@ -1500,8 +1518,7 @@ internal sealed class MainWindow : ResponsiveAddon
 		}
 		catch (Exception ex6)
 		{
-			detailOk = false;
-			Log("[原生UI] 详情内容更新失败：" + ex6.GetType().Name);
+			Log("[原生UI] 详情内容更新失败：" + ex6);
 		}
 		Reflow(s, selRowKey);
 	}
@@ -1545,6 +1562,8 @@ internal sealed class MainWindow : ResponsiveAddon
     {
         if (scroll == null || content == null || fixedRoot == null) return;
         float w = BodyWidth - 12, y = 0;
+        float? detailTop = null;
+        float detailBottom = 0;
         fixedRoot.Position = Vector2.Zero;
         float searchWidth=MathF.Floor(Math.Clamp(w*.28f,90,180));
         if(MathF.Abs(searchInput.Width-searchWidth)>.1f)searchInput.Width=searchWidth;
@@ -1602,7 +1621,7 @@ internal sealed class MainWindow : ResponsiveAddon
             }
             y += 28;
             if (hunt.Key != expandedKey || !hunt.Expanded) continue;
-            if (bHideHunt != null && bHideHunt.IsVisible) { bHideHunt.Position = new Vector2(20,y); y += bHideHunt.Height + 6; }
+            detailTop = y - 28;
             string tooltip = (ConditionCatalog.Find(hunt.En)?.Method ?? "") + "\n" + hunt.ConditionRange;
             foreach (var text in new[] {detailCond, detailTime, detailRange})
             {
@@ -1620,11 +1639,28 @@ internal sealed class MainWindow : ResponsiveAddon
                 button.Position=new Vector2(dx,y); dx+=button.Width+8; lineH=MathF.Max(lineH,button.Height);
             }
             y+=lineH+8;
+            float actionsX = 20;
+            foreach (var button in new[] { bWatchHunt, bHideHunt })
+            {
+                if (button == null || !button.IsVisible) continue;
+                if (actionsX + button.Width > w && actionsX > 20) { actionsX = 20; y += 32; }
+                button.Position = new Vector2(actionsX, y);
+                actionsX += button.Width + 8;
+            }
+            y += 34;
+            detailBottom = y;
         }
         status.Fit(w,11,true); status.Position=new Vector2(0,y); y+=status.Height+8;
         scroll.Position=ContentStartPosition; scroll.Size=new Vector2(BodyWidth,BodyHeight);
         content.Height=MathF.Max(y,BodyHeight);
         scroll.RecalculateSizes(); scroll.ScrollBarNode.UpdateScrollParams();
+        if (revealDetails && detailTop is { } top)
+        {
+            float position = scroll.ScrollBarNode.ScrollPosition;
+            if (top < position || detailBottom > position + BodyHeight)
+                scroll.ScrollBarNode.ScrollPosition = Math.Clamp(Math.Min(top, detailBottom - BodyHeight + 8), 0, scroll.ScrollBarNode.ScrollMaxPosition);
+            revealDetails = false;
+        }
         if(trackNode!=null) trackNode.IsVisible=false;
     }
 

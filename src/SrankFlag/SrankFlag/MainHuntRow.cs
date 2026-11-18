@@ -44,6 +44,7 @@ internal sealed class MainHuntRow
 	internal string PointsHint = "";
 
 	internal bool Expanded;
+	internal bool Watched;
 
 	internal bool HasSpecial;
 

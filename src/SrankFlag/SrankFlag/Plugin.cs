@@ -153,6 +153,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		public string dc { get; set; } = "";
 
 		public Dictionary<string, DcFilter> byDc { get; set; } = new Dictionary<string, DcFilter>(StringComparer.Ordinal);
+		public Dictionary<string, List<string>> watchedWorlds { get; set; } = new(StringComparer.Ordinal);
 	}
 
 	private readonly record struct FlagResult(bool Ok, string Message, uint TerritoryId = 0u, uint MapId = 0u);
@@ -866,19 +867,11 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		new Vector4(0.55f, 0.85f, 0.28f, 1f)
 	};
 
-	private const string BearApi = "https://tracker.beartoolkit.com/api/getHuntInfo";
-
 	private const string LiveApi = "http://119.29.119.179/api/live?dc=";
 
 	private const string SelfHostedDc = "豆豆柴";
 
 	private static readonly TimeSpan BearInterval = TimeSpan.FromMinutes(15L);
-
-	private static readonly TimeSpan BearForceFloor = TimeSpan.FromSeconds(10L);
-
-	private const int BearFallbackCooldownMin = 60;
-
-	private const int BearFallbackMaxPairs = 60;
 
 	private static readonly Lazy<HttpClient> BearHttp = new Lazy<HttpClient>(() =>
 	{
@@ -892,7 +885,8 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private DateTime lastBearFetch = DateTime.MinValue;
 
-	private DateTime lastBearFallback = DateTime.MinValue;
+	private DateTime lastPublicBearFetchUtc, publicBearFailureUntilUtc;
+	private readonly Dictionary<string, DateTime> lastPublicBearFetchByDc = new(StringComparer.Ordinal);
 
 	private DateTime lastBearOk = DateTime.MinValue;
 
@@ -6778,6 +6772,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			OpenHidden = ToggleHiddenHunts,
 			OpenWatch = OpenConditionFloating,
 			HideHunt = HideHunt,
+			ToggleWatch = ToggleWatchHunt,
 			Mini = () =>
 			{
 			},
@@ -7023,6 +7018,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				Key = text,
 				En = item.en,
 				World = item2,
+				Watched = IsWatchingHunt(item.en, item2),
 				Cn = item.cn,
 				Map = item.map,
 				State = item3,
@@ -8347,23 +8343,6 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 	}
 
-	private static async Task<(string hunt, string world, double ts)> BearQueryAsync(string huntEn, string world,CancellationToken token=default)
-	{
-		using var timeout=CancellationTokenSource.CreateLinkedTokenSource(token);
-		timeout.CancelAfter(TimeSpan.FromSeconds(8));
-		string content = JsonSerializer.Serialize(new
-		{
-			HuntName = huntEn,
-			WorldName = world
-		});
-		using StringContent content2 = new StringContent(content, Encoding.UTF8, "application/json");
-		using HttpResponseMessage resp = await BearHttp.Value.PostAsync(BearApi, content2,timeout.Token).ConfigureAwait(continueOnCapturedContext: false);
-		resp.EnsureSuccessStatusCode();
-		using JsonDocument jsonDocument = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));
-		if(jsonDocument.RootElement.ValueKind!=JsonValueKind.Array)throw new InvalidDataException("公开熊站返回的记录格式无效");
-		return (huntEn,world,BearRefreshPolicy.LatestKill(jsonDocument.RootElement));
-	}
-
 	private void MaybeRefreshRestart(bool force)
 	{
 		if(!BearRefreshPolicy.UsesMainSite(currentDc))return;
@@ -8397,135 +8376,136 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		}
 	}
 
-	private void MaybeStartBearFetch(bool force,bool notify=false)
+	private void MaybeStartBearFetch(bool force, bool notify = false)
 	{
-		if(bearFetching){if(notify)Print($"{currentDc} 正在刷新，请稍候。");return;}
-		var target=srankData?.data;
-		if(target==null||target.hunts.Length==0||target.worlds.Length==0){if(notify)Print("暂无可刷新的狩猎数据。");return;}
-		string dc=target.dc;
-		if(!BearRefreshPolicy.CanStart(dc,force,DateTime.UtcNow-lastBearFetch)){if(notify)Print("刷新间隔至少 10 秒，请稍后重试。");return;}
-		bool mainSite=BearRefreshPolicy.UsesMainSite(dc);
-		bearRequest?.Dispose();
-		var request=CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-		request.CancelAfter(TimeSpan.FromMinutes(5));
-		bearRequest=request;
-		CancellationToken token=request.Token;
-		int generation=++bearRequestGeneration;
-		bearFetching=true;bearNotify=notify;lastBearFetch=DateTime.UtcNow;
-		bearStatus=mainSite?"主站拉取中…":"公开熊站手动加载中…";
-		if(notify)Print($"开始刷新 {dc} · {(mainSite?"主站":"公开熊站")}，完成后会提示。");
-		log.Information($"[SrankFlag.Bear] 开始加载：{dc} · {(mainSite?"主站":"手动公开熊站")}");
-		var pairs=target.hunts.Select(h=>h.en).Where(en=>!string.IsNullOrWhiteSpace(en)).Distinct()
-			.SelectMany(hunt=>target.worlds.Select(world=>(h:hunt,w:world))).ToList();
-		var elapsed=System.Diagnostics.Stopwatch.StartNew();
-		Task.Run(async()=>
+		if (bearFetching)
 		{
-			var bag=new ConcurrentDictionary<string,double>(StringComparer.Ordinal);
-			var maintenance=new ConcurrentDictionary<string,double>(StringComparer.Ordinal);
-			int completed=0,failed=0,batchCount=0,historyQueries=0,total=pairs.Count;
-			string? lastError=null;
-			bool interrupted=false;
+			if (notify) Print($"{currentDc} 正在刷新，请稍候。");
+			return;
+		}
+		var target = srankData?.data;
+		if (target == null || target.hunts.Length == 0 || target.worlds.Length == 0)
+		{
+			if (notify) Print("暂无可刷新的狩猎数据。");
+			return;
+		}
+		string dc = target.dc;
+		bool mainSite = BearRefreshPolicy.UsesMainSite(dc);
+		DateTime now = DateTime.UtcNow;
+		if (mainSite && !BearRefreshPolicy.CanStart(dc, force, now - lastBearFetch))
+		{
+			if (notify) Print("刷新间隔至少 10 秒，请稍后重试。");
+			return;
+		}
+		if (!mainSite)
+		{
+			if (!force) return;
+			DateTime next = BearRefreshPolicy.NextPublicRefresh(lastPublicBearFetchUtc,
+				lastPublicBearFetchByDc.GetValueOrDefault(dc), publicBearFailureUntilUtc);
+			if (now < next)
+			{
+				if (notify) Print($"公开熊站已启用访问间隔，请在 {Math.Ceiling((next - now).TotalSeconds)} 秒后刷新 {dc}。当前显示缓存。");
+				return;
+			}
+			lastPublicBearFetchUtc = lastPublicBearFetchByDc[dc] = now;
+		}
+
+		bearRequest?.Dispose();
+		var request = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+		request.CancelAfter(TimeSpan.FromSeconds(45));
+		bearRequest = request;
+		CancellationToken token = request.Token;
+		int generation = ++bearRequestGeneration;
+		bearFetching = true;
+		bearNotify = notify;
+		lastBearFetch = now;
+		string origin = mainSite ? "主站" : "公开熊站";
+		bearStatus = origin + "加载中…";
+		if (notify) Print($"开始刷新 {dc} · {origin}，完成后会提示。");
+		log.Information($"[SrankFlag.Bear] 开始加载：{dc} · {origin}");
+
+		var hunts = target.hunts.Select(hunt => hunt.en).Where(en => !string.IsNullOrWhiteSpace(en)).Distinct().ToArray();
+		var elapsed = System.Diagnostics.Stopwatch.StartNew();
+		Task.Run(async () =>
+		{
+			var times = new ConcurrentDictionary<string, double>(StringComparer.Ordinal);
+			var maintenance = new Dictionary<string, double>(StringComparer.Ordinal);
+			var traffic = new BearTraffic();
+			string? error = null;
+			bool failed = false;
 			try
 			{
-				if(!mainSite)
+				if (!mainSite)
 				{
-					try
+					var timers = await bearBulk.Value.FetchAsync(hunts, target.worlds, token, traffic).ConfigureAwait(false);
+					foreach (var (key, timer) in timers)
 					{
-						var timers=await bearBulk.Value.FetchAsync(target.hunts.Select(h=>h.en).Distinct().ToArray(),target.worlds,token).ConfigureAwait(false);
-						foreach(var (key,timer) in timers)
+						times[key] = timer.Timestamp;
+						if (timer.Maintenance) maintenance[key] = timer.Timestamp;
+					}
+				}
+				else
+				{
+					using var response = await BearHttp.Value.GetAsync(LiveApi + Uri.EscapeDataString(dc), token).ConfigureAwait(false);
+					response.EnsureSuccessStatusCode();
+					using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token).ConfigureAwait(false));
+					if (document.RootElement.TryGetProperty("live", out var live) && live.ValueKind == JsonValueKind.Object)
+					{
+						foreach (var world in live.EnumerateObject())
 						{
-							bag[key]=timer.Timestamp;
-							if(timer.Maintenance)maintenance[key]=timer.Timestamp;
-						}
-						completed=batchCount=bag.Count;
-						if(completed==total)return;
-						pairs=pairs.Where(pair=>!bag.ContainsKey(pair.h+"|"+pair.w)).ToList();
-						if(batchCount>0)
-							_ = framework.RunOnTick(()=>
+							if (!target.worlds.Contains(world.Name) || world.Value.ValueKind != JsonValueKind.Object) continue;
+							foreach (var hunt in world.Value.EnumerateObject())
 							{
-								if(cts.IsCancellationRequested||generation!=bearRequestGeneration)return;
-								ApplyBearResult(bag,target,true,maintenance);
-								bearStatus=$"公开熊站 · 已批量加载 {batchCount}/{total} · 补查缺失项…";
-								nativeHud?.ForceMainRefresh();
-							});
+								var latest = BearRefreshPolicy.MainSiteLatest(hunt.Value);
+								if (latest.Timestamp <= 0) continue;
+								string key = hunt.Name + "|" + world.Name;
+								times[key] = latest.Timestamp;
+								if (latest.Maintenance) maintenance[key] = latest.Timestamp;
+							}
+						}
 					}
-					catch(OperationCanceledException) when(token.IsCancellationRequested){throw;}
-					catch(HttpRequestException ex) when(ex.StatusCode==HttpStatusCode.TooManyRequests)
-					{failed++;interrupted=true;lastError="公开熊站限流，请稍后重试";return;}
-					catch(Exception ex){log.Warning("[SrankFlag] 公开熊站批量查询暂不可用，退回缺失项查询："+ex.Message);}
 				}
-				if(mainSite)
-				{
-					// Only 豆豆柴 may use the main site's aggregation endpoint.
-					try
-					{
-						using var response=await BearHttp.Value.GetAsync(LiveApi+Uri.EscapeDataString(dc),token).ConfigureAwait(false);
-						response.EnsureSuccessStatusCode();
-						using var document=JsonDocument.Parse(await response.Content.ReadAsStringAsync(token).ConfigureAwait(false));
-						if(document.RootElement.TryGetProperty("live",out var live)&&live.ValueKind==JsonValueKind.Object)
-							foreach(var world in live.EnumerateObject())
-								if(world.Value.ValueKind==JsonValueKind.Object&&target.worlds.Contains(world.Name))
-									foreach(var hunt in world.Value.EnumerateObject())
-									{
-										var latest=BearRefreshPolicy.MainSiteLatest(hunt.Value);
-										if(latest.Timestamp>0)
-										{
-											string key=hunt.Name+"|"+world.Name;
-											bag[key]=latest.Timestamp;
-											if(latest.Maintenance)maintenance[key]=latest.Timestamp;
-										}
-									}
-					}
-					catch(OperationCanceledException){throw;}
-					catch(Exception ex){log.Warning("[SrankFlag] 豆豆柴主站拉取失败："+ex.Message);}
-					if(!bag.IsEmpty)return;
-					if(DateTime.UtcNow-lastBearFallback<TimeSpan.FromMinutes(60))return;
-					lastBearFallback=DateTime.UtcNow;
-					pairs=pairs.Take(60).ToList();
-					total=pairs.Count;
-				}
-				// Other three DCs reach this branch only after an explicit manual refresh.
-				await Parallel.ForEachAsync(pairs,new ParallelOptions{MaxDegreeOfParallelism=4,CancellationToken=token},async(pair,ct)=>
-				{
-					try
-					{
-						Interlocked.Increment(ref historyQueries);
-						var result=await BearQueryAsync(pair.h,pair.w,ct).ConfigureAwait(false);
-						bag[result.hunt+"|"+result.world]=result.ts;
-					}
-					catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}
-					catch(Exception ex)
-					{
-						lastError=ex.Message;
-						if(ex is HttpRequestException {StatusCode:HttpStatusCode.TooManyRequests})request.Cancel();
-						if(Interlocked.Increment(ref failed)>=6&&bag.IsEmpty)request.Cancel();
-					}
-					int done=Interlocked.Increment(ref completed);
-					if(done%8==0&&!cts.IsCancellationRequested&&!token.IsCancellationRequested)
-						framework.RunOnTick(()=>
-						{
-							if(cts.IsCancellationRequested||generation!=bearRequestGeneration)return;
-							ApplyBearResult(bag,target,true,maintenance);
-							bearStatus=$"公开熊站 · {done}/{total} · {bag.Values.Count(value=>value>0)} 条记录 · {failed} 次失败";
-							nativeHud?.ForceMainRefresh();
-						});
-				}).ConfigureAwait(false);
 			}
-			catch(OperationCanceledException){interrupted=true;}
-			catch(Exception ex){failed++;log.Warning("[SrankFlag] 熊站加载失败："+ex.Message);}
+			catch (OperationCanceledException)
+			{
+				error = "请求已取消或超时";
+			}
+			catch (Exception ex)
+			{
+				failed = true;
+				error = ex is HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } ? "公开熊站限流" : ex.Message;
+			}
 			finally
 			{
-				if(!cts.IsCancellationRequested)
-					framework.RunOnTick(()=>
+				if (!cts.IsCancellationRequested)
+					_ = framework.RunOnTick(() =>
 					{
-						if(cts.IsCancellationRequested||generation!=bearRequestGeneration)return;
-						ApplyBearResult(bag,target,true,maintenance);
-						bearFetching=false;
-						bearNotify=false;
-						string origin=mainSite?"主站":"公开熊站";
-						bearStatus=bag.IsEmpty?$"{origin}暂不可用 · 点击刷新重试":$"{origin}已加载 {bag.Values.Count(value=>value>0)} 条记录"+((failed>0||interrupted)?$" · 部分未完成（{failed} 次失败）":"");
-						log.Information($"[SrankFlag.Bear] 加载结束：{dc} · {bag.Count} 条 · {completed}/{total} · {failed} 次失败 · 批量 {batchCount} · 逐条 {historyQueries} · {elapsed.ElapsedMilliseconds}ms"+(lastError==null?"":" · "+lastError));
-						if(notify)Print(BearRefreshPolicy.CompletionNotice(dc,origin,bag.Values.Count(value=>value>0),bag.Count,failed,interrupted)+$" · 耗时 {elapsed.Elapsed.TotalSeconds:F1} 秒");
+						if (cts.IsCancellationRequested) return;
+						if (!mainSite && failed)
+						{
+							TimeSpan cooldown = BearRefreshPolicy.PublicFailureInterval;
+							if (traffic.RetryAfter > cooldown) cooldown = traffic.RetryAfter.Value;
+							DateTime until = DateTime.UtcNow + cooldown;
+							if (until > publicBearFailureUntilUtc) publicBearFailureUntilUtc = until;
+						}
+						if (!mainSite)
+							log.Information($"[SrankFlag.Bear] 公开熊站用量：{dc} · 会话 GET {traffic.SessionRequests} · 批量 POST {traffic.TimerRequests} · 逐条 0 · 请求正文 {traffic.UploadBytes} B · 响应解压后正文 {traffic.DecodedBytes} B");
+						if (generation != bearRequestGeneration) return;
+
+						if (!times.IsEmpty) ApplyBearResult(times, target, true, maintenance);
+						bearFetching = false;
+						bearNotify = false;
+						int records = times.Values.Count(value => value > 0);
+						bool partial = !mainSite && times.Count > 0 && times.Count < hunts.Length * target.worlds.Length;
+						bearStatus = times.IsEmpty ? $"{origin}暂无新数据 · 显示缓存"
+							: $"{origin}已加载 {records} 条记录" + (partial ? " · 缺失项沿用缓存" : "");
+						log.Information($"[SrankFlag.Bear] 加载结束：{dc} · {times.Count} 条 · {elapsed.ElapsedMilliseconds}ms" + (error == null ? "" : " · " + error));
+						if (notify)
+						{
+							string outcome = times.IsEmpty ? "刷新未取得新数据" : partial ? "刷新部分完成" : "刷新完成";
+							Print($"{outcome}：{dc} · {origin} · {records} 条有效记录 · 耗时 {elapsed.Elapsed.TotalSeconds:F1} 秒"
+								+ (partial ? " · 缺失项沿用缓存" : "") + (error == null ? "" : " · " + error));
+						}
 						nativeHud?.ForceMainRefresh();
 					});
 			}

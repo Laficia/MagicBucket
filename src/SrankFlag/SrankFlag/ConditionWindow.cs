@@ -118,7 +118,7 @@ internal sealed class ConditionWindow(ConditionActions actions, bool floating = 
             headerHeight = Flow(width, headerHeight, search, all, none);
         }
         header.Size = new(BodyWidth, headerHeight);
-        string key = (managing ? "manage:" : "remind:") + string.Join("|", snapshot.Rows.Select(row => row.En));
+        string key = (managing ? "manage:" : "remind:") + string.Join("|", snapshot.Rows.Select(row => row.Key));
         bool resetScroll = key != layoutKey;
         layoutKey = key;
         while (rows.Count < snapshot.Rows.Count) rows.Add(CreateRow());
@@ -130,7 +130,7 @@ internal sealed class ConditionWindow(ConditionActions actions, bool floating = 
             row.Root.IsVisible = visible;
             if (!visible) continue;
             var data = snapshot.Rows[i];
-            row.Key = data.En;
+            row.Key = data.Key;
             string detail = data.Method + "\n" + data.Rule + "\n" + string.Join("\n", data.Worlds.Select(world => world.Name + " · " + world.Detail));
             row.Root.Position = new(0, y);
             row.Name.IsVisible = row.Timer.IsVisible = !managing;
@@ -141,7 +141,8 @@ internal sealed class ConditionWindow(ConditionActions actions, bool floating = 
             {
                 // Apply the native state before visibility: its timeline must not
                 // resurrect controls belonging to the other presentation mode.
-                row.Subscription.Apply(data.Name, data.Subscribed, width, width);
+                string label = data.PinnedWorld.Length == 0 ? data.Name : data.PinnedWorld + " · " + data.Name;
+                row.Subscription.Apply(label, data.Subscribed, width, width);
                 row.Subscription.Position = Vector2.Zero;
                 row.Subscription.TextTooltip = detail;
                 height = 30;
@@ -160,7 +161,7 @@ internal sealed class ConditionWindow(ConditionActions actions, bool floating = 
                 row.Timer.Position = new(width - timerWidth, 0);
                 row.Timer.TextTooltip = detail;
                 float nextLine = MathF.Max(row.Name.Height, row.Timer.Height) + 5;
-                var ready = data.Worlds.Where(world => world.Ready).ToList();
+                var ready = data.Worlds.Where(world => world.Ready || world.Name == data.PinnedWorld).ToList();
                 if (ready.Count == 0)
                 {
                     row.Empty.IsVisible = true;
