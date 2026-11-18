@@ -562,7 +562,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 
 	private bool returnClickLogged;
 
-	private bool mainWindowOpen = true;
+	private bool mainWindowOpen;
 
 	private bool settingsWindowOpen;
 
@@ -2786,6 +2786,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		lastBearFetch = DateTime.UtcNow - BearInterval;
 		this.framework.Update += Framework_OnUpdate;
 		this.clientState.Login += ClientState_OnLogin;
+		this.clientState.Logout += ClientState_OnLogout;
 		uiBuilder.Draw += DrawMainWindow;
 		try
 		{
@@ -2818,6 +2819,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		commandManager.RemoveHandler("/水桶");
 		framework.Update -= Framework_OnUpdate;
 		clientState.Login -= ClientState_OnLogin;
+		clientState.Logout -= ClientState_OnLogout;
 		uiBuilder.Draw -= DrawMainWindow;
 		try
 		{

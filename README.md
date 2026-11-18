@@ -1,6 +1,6 @@
 # 魔法水桶：本地源码恢复版本
 
-当前版本 `1.2.14.4`，基于 [MiSaKaQAQ/MagicBucket v1.2.13](https://github.com/MiSaKaQAQ/MagicBucket/releases/tag/v1.2.13) 发布包恢复。上游 Git 仓库只有安装索引，没有公开 C# 源码；`src/SrankFlag` 是通过 ILSpy 11.2.0.10050 反编译 DLL 后修复编译问题的代码，不是作者原始工程。原作者信息 `hunhuan` 保留在插件清单中。
+当前版本 `1.2.14.5`，基于 [MiSaKaQAQ/MagicBucket v1.2.13](https://github.com/MiSaKaQAQ/MagicBucket/releases/tag/v1.2.13) 发布包恢复。上游 Git 仓库只有安装索引，没有公开 C# 源码；`src/SrankFlag` 是通过 ILSpy 11.2.0.10050 反编译 DLL 后修复编译问题的代码，不是作者原始工程。原作者信息 `hunhuan` 保留在插件清单中。
 
 ## 原生样式与手动数据加载
 
@@ -22,6 +22,8 @@
 - 传送回归检查：dotnet run --project tests/TravelChecks -c Release。
 
 ## 本地增强
+
+- 插件加载和角色登录时，窗口默认关闭。使用 `/水桶` 或 `/srankflag` 打开主窗口。正常过图仍保留手动打开的窗口。
 
 - 主窗口“悬浮窗”按钮打开独立的订阅提醒。关闭后可从主窗口重新打开，也可使用 `/水桶 watch` 切换。倒计时与彩色服名分别占行，右下角调尺寸，位置可锁定。右键 S 怪详情可加减当前服的订阅。同名 S 指定服务器后，悬浮窗优先显示这些指定服。订阅管理列表可以取消单独的服务器订阅。
 - 过图前打开的原生窗口在落地后恢复。订阅管理顶部固定，切换视图或搜索时回到列表顶部。
@@ -54,7 +56,7 @@
 
 游戏内使用 `/水桶` 或 `/srankflag` 开关主窗口；`/水桶 settings` 打开设置。插件名称为“魔法水桶”，本地加载时在开发插件列表管理。
 
-运行 `./build-release.ps1` 生成 `artifacts/release/v1.2.14.4/SrankFlag.zip` 和 SHA256 校验文件。发布脚本只打包明确列出的程序集、初始狩猎数据和许可证，不包含本地偏好、缓存或订阅设置。正式发布说明见 [release-notes.zh-CN.md](release-notes.zh-CN.md)。
+运行 `./build-release.ps1` 生成 `artifacts/release/v1.2.14.5/SrankFlag.zip` 和 SHA256 校验文件。发布脚本只打包明确列出的程序集、初始狩猎数据和许可证，不包含本地偏好、缓存或订阅设置。正式发布说明见 [release-notes.zh-CN.md](release-notes.zh-CN.md)。
 
 ## 恢复范围
 
