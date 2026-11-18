@@ -236,7 +236,7 @@ internal sealed class MainWindow : ResponsiveAddon
 	private bool sortAsc = true;
 	private bool showOpenRows = true;
 	private TextButtonNode? bConditions;
-	private TextButtonNode? bHidden, bHideHunt;
+	private TextButtonNode? bHidden, bHideHunt, bWatch;
 	protected override Vector2 MinimumSize => new(420, 300);
 
 	private bool sortActive;
@@ -499,6 +499,7 @@ internal sealed class MainWindow : ResponsiveAddon
 			attachParent = fixedRoot;
 			bConditions = B(contentStartPosition, 100, 26, "条件订阅", () => actions.OpenConditions());
 			bHidden = B(contentStartPosition, 100, 26, "已隐藏", () => actions.OpenHidden());
+			bWatch = B(contentStartPosition, 84, 26, "悬浮窗", () => actions.OpenWatch());
 			bHideHunt = B(contentStartPosition, 150, 26, "隐藏该类 S 怪", () =>
 			{
 				string en = expandedKey.Split('\u0001')[0];
@@ -1549,7 +1550,7 @@ internal sealed class MainWindow : ResponsiveAddon
         if(MathF.Abs(searchInput.Width-searchWidth)>.1f)searchInput.Width=searchWidth;
         bDc.IsVisible = false;
         y = Flow(w, y, searchInput, bClearSearch, bRefresh);
-        y = Flow(w, y, bConditions, bHistory, bSettings, bHidden);
+        y = Flow(w, y, bConditions, bHistory, bSettings, bHidden, bWatch);
         bManualHint.IsVisible = s.NeedsManualRefresh;
         if (s.NeedsManualRefresh) { bManualHint.String = s.Fetching ? "公开熊站 · 手动加载中…" : "公开熊站 · 点击“刷新”手动加载"; bManualHint.Fit(w, 11, true); y = Flow(w, y, bManualHint); }
         y = Flow(w, y, dcButtons);

@@ -28,7 +28,7 @@ public sealed partial class Plugin
         Toggle=en=> {Subscriptions.Toggle(en);lastConditionBuildUtc=DateTime.MinValue;},
         SelectAll=selected=> {Subscriptions.SelectAll(selected);lastConditionBuildUtc=DateTime.MinValue;},
         ToggleView=()=> {conditionOnlySubscribed=!conditionOnlySubscribed;lastConditionBuildUtc=DateTime.MinValue;},
-        ToggleFloating=ToggleConditionFloating,
+        ToggleFloating=OpenConditionFloating,
         Closed=()=> QueueNativeWindowClose(() => conditionWindowOpen=false)
     };
 
@@ -36,6 +36,13 @@ public sealed partial class Plugin
     {
         CancelPendingWindowClose();
         conditionFloatingOpen = !conditionFloatingOpen;
+        lastConditionBuildUtc = DateTime.MinValue;
+    }
+
+    private void OpenConditionFloating()
+    {
+        CancelPendingWindowClose();
+        conditionFloatingOpen = true;
         lastConditionBuildUtc = DateTime.MinValue;
     }
 

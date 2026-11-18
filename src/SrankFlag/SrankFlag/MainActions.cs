@@ -72,6 +72,7 @@ internal sealed class MainActions
 	{
 	};
 	internal Action OpenConditions = () => { };
+	internal Action OpenWatch = () => { };
 	internal Action OpenHidden = () => { };
 	internal Action<string> HideHunt = _ => { };
 

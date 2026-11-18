@@ -6776,6 +6776,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 				ApplyHistoryWindowNow();
 			},
 			OpenHidden = ToggleHiddenHunts,
+			OpenWatch = OpenConditionFloating,
 			HideHunt = HideHunt,
 			Mini = () =>
 			{

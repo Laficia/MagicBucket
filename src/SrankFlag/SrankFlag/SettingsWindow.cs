@@ -22,7 +22,7 @@ internal sealed class SettingsWindow : ResponsiveAddon
 		("main", "显示主窗口"),
 		("auto", "显示自动前往窗口"),
 		("hud", "显示触发悬浮窗"),
-		("conditions", "显示条件订阅悬浮窗"),
+		("conditions", "显示条件订阅窗口"),
 		("summon", "自动召唤随从"),
 		("leave", "独身自动退本"),
 		("return", "倒地自动确认返回")
