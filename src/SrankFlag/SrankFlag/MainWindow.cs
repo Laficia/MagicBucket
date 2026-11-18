@@ -238,6 +238,9 @@ internal sealed class MainWindow : ResponsiveAddon
 	private TextButtonNode? bConditions;
 	private TextButtonNode? bHidden, bHideHunt, bWatch, bWatchHunt;
 	private bool revealDetails;
+	private MainSnapshot? lastSnapshot;
+	private float lastLayoutScroll;
+	private Vector2 lastLayoutSize;
 	protected override Vector2 MinimumSize => new(420, 300);
 
 	private bool sortActive;
@@ -673,7 +676,7 @@ internal sealed class MainWindow : ResponsiveAddon
 			attachParent = null;
 			status = T(contentStartPosition, 576f, 20f, 11u, "");
 			status.TextColor = MutedText;
-			EnsureRows(64);
+			EnsureRows(12);
 			if (CanaryBar)
 			{
 				canaryOut = new ColorImageNode
@@ -1144,7 +1147,8 @@ internal sealed class MainWindow : ResponsiveAddon
 		{
 			try
 			{
-				Reflow(s, null);
+				lastSnapshot = s;
+				Reflow(s);
 			}
 			catch
 			{
@@ -1307,7 +1311,6 @@ internal sealed class MainWindow : ResponsiveAddon
 		SortHunts(s.Hunts);
 		RefreshHeaders();
 		int count = s.Hunts.Count;
-		EnsureRows(count);
 		try
 		{
 			NativeButtonStyle.FitText(listTitle, s.Ready ? (count == 0 ? (s.OnlyOpen ? "暂无已开闸 S 怪" : "暂无未开闸 S 怪") : $"{(s.OnlyOpen ? "已开闸" : "未开闸")} S 怪 {count}") : "数据未加载", 520f);
@@ -1315,53 +1318,6 @@ internal sealed class MainWindow : ResponsiveAddon
 		catch (Exception ex5)
 		{
 			Log("[原生UI] 列表标题文本失败：" + ex5.GetType().Name);
-		}
-		string selRowKey = null;
-		for (int n = 0; n < rows.Count; n++)
-		{
-			RowNodes rn = rows[n];
-			MainHuntRow r = ((n < count) ? s.Hunts[n] : null);
-			rowKeys[n] = r?.Key ?? "";
-			bool flag6 = r != null;
-			ShowNode(rn.Hit, flag6);
-			ShowNode(rn.World, flag6);
-			ShowNode(rn.Name, flag6);
-			ShowNode(rn.Bar, flag6);
-			ShowNode(rn.Tail, flag6);
-			ShowNode(rn.Badge, flag6 && r != null && r.Triggered);
-			if (r != null)
-			{
-				if (string.Equals(r.Key, selectedKey, StringComparison.Ordinal))
-				{
-					selRowKey = r.Key;
-				}
-				RowStep("底纹", () =>
-				{
-					rn.Hit.BackgroundNode.IsVisible = false;
-				}, r.En);
-				RowStep("服务器", () =>
-				{
-					SetT(rn.World, TrimWorld(r.World));
-					rn.World.TextColor = ServerColors.ForWorld(r.World);
-				}, r.En);
-				RowStep("怪名", () =>
-				{
-					SetT(rn.Name, r.RowLabel);
-				}, r.En);
-				RowStep("血条", () =>
-				{
-					float prog = ((r.State == "unknown") ? 0f : Math.Clamp((float)r.PctValue / 100f, 0f, 1f));
-					rn.Bar.Progress = prog;
-				}, r.En);
-				RowStep("百分比", () =>
-				{
-					SetT(rn.Tail, r.State == "cd" ? r.Clock : r.Pct);
-				}, r.En);
-				RowStep("已触发红标", () =>
-				{
-					rn.Badge.TextColor = TrigRed;
-				}, r.En);
-			}
 		}
 		if (!detailBuilt)
 		{
@@ -1520,7 +1476,8 @@ internal sealed class MainWindow : ResponsiveAddon
 		{
 			Log("[原生UI] 详情内容更新失败：" + ex6);
 		}
-		Reflow(s, selRowKey);
+		lastSnapshot = s;
+		Reflow(s);
 	}
 
 	private static string TrimWorld(string? w)
@@ -1558,7 +1515,7 @@ internal sealed class MainWindow : ResponsiveAddon
 		};
 	}
 
-	private void Reflow(MainSnapshot s, string? selRowKey)
+	private void Reflow(MainSnapshot s)
     {
         if (scroll == null || content == null || fixedRoot == null) return;
         float w = BodyWidth - 12, y = 0;
@@ -1589,35 +1546,47 @@ internal sealed class MainWindow : ResponsiveAddon
         sortHeaders[2].Position = new Vector2(barX, y);
         y += 30;
         fixedRoot.Size = new Vector2(w, y);
-        for (int i = 0; i < rows.Count; i++)
+        float visibleStart = scroll.ScrollBarNode.ScrollPosition;
+        float visibleEnd = visibleStart + BodyHeight;
+        lastLayoutScroll = visibleStart;
+        lastLayoutSize = Size;
+        int slot = 0;
+        foreach (var hunt in s.Hunts)
         {
-            var row = rows[i];
-            if (i >= s.Hunts.Count)
+            bool inViewport = y + 28 >= visibleStart - 56 && y <= visibleEnd + 56;
+            if (inViewport)
             {
-                foreach (var node in new NodeBase[] {row.Hit,row.World,row.Name,row.Bar,row.Tail,row.Badge}) node.IsVisible = false;
-                continue;
-            }
-            var hunt = s.Hunts[i];
-            bool open = hunt.State == "open";
-            row.Hit.Size = new Vector2(w, 28); row.Hit.Position = new Vector2(0,y);
-            row.World.Position = new Vector2(worldX,y+4); row.World.Fit(columns.WorldWidth,13);
-            row.Name.Position = new Vector2(nameX,y+4); row.Name.Fit(columns.NameWidth - (hunt.Triggered ? 44 : 0),13);
-            row.Badge.Position = new Vector2(barX-44,y+4); row.Badge.IsVisible = hunt.Triggered;
-            row.Bar.IsVisible = open;
-            if (open)
-            {
-                row.Bar.Size=new Vector2(barW,12);
-                row.Bar.Progress=Math.Clamp((float)hunt.PctValue/100f,0,1);
-                row.Bar.Position=new Vector2(barX,y+8);
-            }
-            row.Tail.Position = new Vector2(open ? barX+barW+6 : barX,y+4);
-            row.Tail.AlignmentType = open ? AlignmentType.Right : AlignmentType.Left;
-            row.Tail.Fit(open ? 36 : barW+42,12);
-            row.Tail.IsVisible = true;
-            if (selRowBg != null && selFrameLeft != null && hunt.Key == selRowKey)
-            {
-                selRowBg.Position = new Vector2(0,y); selRowBg.Size = new Vector2(w,28); selRowBg.IsVisible = true;
-                selFrameLeft.Position = new Vector2(0,y); selFrameLeft.IsVisible = true;
+                EnsureRows(slot + 1);
+                var row = rows[slot];
+                rowKeys[slot++] = hunt.Key;
+                row.Hit.IsVisible = row.World.IsVisible = row.Name.IsVisible = row.Tail.IsVisible = true;
+                row.Hit.BackgroundNode.IsVisible = false;
+                SetT(row.World, TrimWorld(hunt.World));
+                row.World.TextColor = ServerColors.ForWorld(hunt.World);
+                SetT(row.Name, hunt.RowLabel);
+                SetT(row.Tail, hunt.State == "cd" ? hunt.Clock : hunt.Pct);
+                bool open = hunt.State == "open";
+                if (row.Hit.Width != MathF.Floor(w) || row.Hit.Height != 28) row.Hit.Size = new Vector2(w, 28);
+                row.Hit.Position = new Vector2(0, y);
+                row.World.Position = new Vector2(worldX,y+4); row.World.Fit(columns.WorldWidth,13);
+                row.Name.Position = new Vector2(nameX,y+4); row.Name.Fit(columns.NameWidth - (hunt.Triggered ? 44 : 0),13);
+                row.Badge.Position = new Vector2(barX-44,y+4); row.Badge.IsVisible = hunt.Triggered;
+                row.Bar.IsVisible = open;
+                if (open)
+                {
+                    if (row.Bar.Width != MathF.Floor(barW) || row.Bar.Height != 12) row.Bar.Size = new Vector2(barW, 12);
+                    row.Bar.Progress=Math.Clamp((float)hunt.PctValue/100f,0,1);
+                    row.Bar.Position=new Vector2(barX,y+8);
+                }
+                row.Tail.Position = new Vector2(open ? barX+barW+6 : barX,y+4);
+                row.Tail.AlignmentType = open ? AlignmentType.Right : AlignmentType.Left;
+                row.Tail.Fit(open ? 36 : barW+42,12);
+                row.Tail.IsVisible = true;
+                if (selRowBg != null && selFrameLeft != null && hunt.Key == selectedKey)
+                {
+                    selRowBg.Position = new Vector2(0,y); selRowBg.Size = new Vector2(w,28); selRowBg.IsVisible = true;
+                    selFrameLeft.Position = new Vector2(0,y); selFrameLeft.IsVisible = true;
+                }
             }
             y += 28;
             if (hunt.Key != expandedKey || !hunt.Expanded) continue;
@@ -1650,6 +1619,14 @@ internal sealed class MainWindow : ResponsiveAddon
             y += 34;
             detailBottom = y;
         }
+        for (int i = slot; i < rows.Count; i++)
+        {
+            if (rowKeys[i].Length == 0) continue;
+            rowKeys[i] = "";
+            var row = rows[i];
+            row.Hit.IsVisible = row.World.IsVisible = row.Name.IsVisible =
+                row.Bar.IsVisible = row.Tail.IsVisible = row.Badge.IsVisible = false;
+        }
         status.Fit(w,11,true); status.Position=new Vector2(0,y); y+=status.Height+8;
         scroll.Position = ContentStartPosition;
         var viewport = new Vector2(MathF.Floor(BodyWidth), MathF.Floor(BodyHeight));
@@ -1669,6 +1646,14 @@ internal sealed class MainWindow : ResponsiveAddon
         if(trackNode!=null) trackNode.IsVisible=false;
     }
 
+	protected unsafe override void OnUpdate(AtkUnitBase* addon)
+	{
+		base.OnUpdate(addon);
+		if (lastSnapshot is { } snapshot && scroll is { } list &&
+		    (lastLayoutScroll != list.ScrollBarNode.ScrollPosition || lastLayoutSize != Size))
+			Reflow(snapshot);
+	}
+
 	protected unsafe override void OnHide(AtkUnitBase* addon)
 	{
 		base.OnHide(addon);
@@ -1680,6 +1665,7 @@ internal sealed class MainWindow : ResponsiveAddon
 
 	protected unsafe override void OnFinalize(AtkUnitBase* addon)
 	{
+		lastSnapshot = null;
 		base.OnFinalize(addon);
 		setupDone = false;
 	}
