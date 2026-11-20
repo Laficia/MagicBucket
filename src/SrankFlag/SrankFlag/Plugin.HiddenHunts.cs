@@ -17,16 +17,21 @@ public sealed partial class Plugin
         lastHiddenHuntBuildUtc = DateTime.MinValue;
         nativeHud?.ForceMainRefresh();
     }
-    private void HideHunt(string en)
+    private void ToggleHuntFilter(string en)
     {
-        var definition = ConditionCatalog.Find(en);
-        if (definition == null) return;
+        var hunt = srankData?.data?.hunts.FirstOrDefault(item => item.en == en);
+        if (hunt == null) return;
         try
         {
-            Visibility.Hide(en);
-            expandedHunts.Remove(en);
-            autoHunts.Remove(definition.Cn);
-            Print("已隐藏「" + definition.Cn + "」的全部服务器条目，可从“已隐藏”恢复。");
+            if (Visibility.IsHidden(en))
+                Visibility.Restore(en);
+            else
+            {
+                Visibility.Hide(en);
+                expandedHunts.Remove(en);
+                autoHunts.Remove(hunt.cn);
+            }
+            lastHiddenHuntBuildUtc = DateTime.MinValue;
             nativeHud?.ForceMainRefresh();
         }
         catch (Exception ex) { log.Error(ex, "[魔法水桶] 保存隐藏列表失败"); Print("隐藏设置未保存：" + ex.Message); }

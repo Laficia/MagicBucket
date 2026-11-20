@@ -6779,7 +6779,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			},
 			OpenHidden = ToggleHiddenHunts,
 			OpenWatch = OpenConditionFloating,
-			HideHunt = HideHunt,
+			ToggleHuntFilter = ToggleHuntFilter,
 			ToggleWatch = ToggleWatchHunt,
 			Mini = () =>
 			{
@@ -6818,10 +6818,13 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 			},
 			ToggleWorld = (string w) =>
 			{
+				if (srankData?.data == null || !srankData.data.worlds.Contains(w, StringComparer.Ordinal))
+					return;
 				if (!worldFilter.Remove(w))
 				{
 					worldFilter.Add(w);
 				}
+				nativeHud?.ForceMainRefresh();
 			},
 			TogglePatch = (string k) =>
 			{
@@ -6946,7 +6949,7 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		{
 			return mainSnapshot;
 		}
-		foreach (string item7 in snapshotData.worlds.Take(16))
+		foreach (string item7 in snapshotData.worlds)
 		{
 			mainSnapshot.Worlds.Add(item7);
 			mainSnapshot.WorldOn.Add(worldFilter.Contains(item7));
@@ -6965,7 +6968,9 @@ public sealed partial class Plugin : IDalamudPlugin, IDisposable
 		HuntData[] hunts = snapshotData.hunts;
 		foreach (HuntData huntData in hunts)
 		{
-			if (Visibility.IsHidden(huntData.en) || (patchSel.Count > 0 && !patchSel.Contains(huntData.patch)) || (searchText.Length > 0 && !(huntData.cn + " " + huntData.en + " " + huntData.map).Contains(searchText, StringComparison.OrdinalIgnoreCase)))
+			bool isVisible = !Visibility.IsHidden(huntData.en);
+			mainSnapshot.HuntFilters.Add(new(huntData.en, huntData.cn, isVisible));
+			if (!isVisible || (patchSel.Count > 0 && !patchSel.Contains(huntData.patch)) || (searchText.Length > 0 && !(huntData.cn + " " + huntData.en + " " + huntData.map).Contains(searchText, StringComparison.OrdinalIgnoreCase)))
 			{
 				continue;
 			}

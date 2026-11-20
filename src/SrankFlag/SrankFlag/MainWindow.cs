@@ -175,25 +175,9 @@ internal sealed class MainWindow : ResponsiveAddon
 	private TextNode? detailCond;
 	private TextNode? detailTime, detailRange;
 
-	private float detailCondW;
-
-	private float detailCondRelX;
-
-	private float detailCondRelY;
-
 	private readonly List<TextButtonNode> detailBtns = new List<TextButtonNode>();
 
 	private readonly List<Action?> detailActions = new List<Action>();
-
-	private readonly List<(float rx, float ry, float w)> detailLayout = new List<(float, float, float)>();
-
-	private int detailLineCount;
-
-	private float detailLabelW;
-
-	private float detailLabelRelX;
-
-	private float detailLabelRelY;
 
 	private const int MaxDcButtons = 8;
 
@@ -236,7 +220,7 @@ internal sealed class MainWindow : ResponsiveAddon
 	private bool sortAsc = true;
 	private bool showOpenRows = true;
 	private TextButtonNode? bConditions;
-	private TextButtonNode? bHidden, bHideHunt, bWatch, bWatchHunt;
+	private TextButtonNode? bHidden, bWatch;
 	private bool revealDetails;
 	private MainSnapshot? lastSnapshot;
 	private float lastLayoutScroll;
@@ -262,6 +246,11 @@ internal sealed class MainWindow : ResponsiveAddon
 	private string rowFailSig = "";
 
 	private bool menuOpen;
+	private SortBy? headerFilter;
+	private int filterPage;
+	private readonly NativeCheckOption[] filterItems = new NativeCheckOption[8];
+	private TextButtonNode? previousPage, nextPage, closeFilter;
+	private TextNode? filterCaption;
 
 	private bool searchInitialized;
 
@@ -455,8 +444,6 @@ internal sealed class MainWindow : ResponsiveAddon
 		rowKeys.Clear();
 		detailBtns.Clear();
 		detailActions.Clear();
-		detailLayout.Clear();
-		detailLineCount = 0;
 		detailLabel = null;
 		detailCond = null;
 		detailTime = detailRange = null;
@@ -467,6 +454,8 @@ internal sealed class MainWindow : ResponsiveAddon
 		canaryOut = null;
 		canaryLogged = false;
 		fixedRoot = null;
+		headerFilter = null;
+		filterPage = 0;
 		trackNode = null;
 		hintTag = null;
 		attachParent = null;
@@ -504,21 +493,6 @@ internal sealed class MainWindow : ResponsiveAddon
 			bConditions = B(contentStartPosition, 100, 26, "条件订阅", () => actions.OpenConditions());
 			bHidden = B(contentStartPosition, 100, 26, "已隐藏", () => actions.OpenHidden());
 			bWatch = B(contentStartPosition, 84, 26, "悬浮窗", () => actions.OpenWatch());
-			bHideHunt = B(contentStartPosition, 150, 26, "隐藏该类 S 怪", () =>
-			{
-				string en = expandedKey.Split('\u0001')[0];
-				if (en.Length == 0) return;
-				actions.HideHunt(en);
-				CollapseDetails();
-			});
-			bHideHunt.IsVisible = false;
-			bHideHunt.TextTooltip = "隐藏这类 S 怪的所有服务器条目；可在“已隐藏”里恢复";
-			bWatchHunt = B(contentStartPosition, 150, 26, "加入悬浮窗", () =>
-			{
-				var pair = expandedKey.Split('\u0001', 2);
-				if (pair.Length == 2) actions.ToggleWatch(pair[0], pair[1]);
-			});
-			bWatchHunt.IsVisible = false;
 			searchInput = new TextInputNode
 			{
 				Position = contentStartPosition,
@@ -671,6 +645,18 @@ internal sealed class MainWindow : ResponsiveAddon
 					SetSort(by);
 				});
 				NativeButtonStyle.SortHeader(sortHeaders[num4], HeaderNames[num4] + " ↕", 22f, on: false);
+				if (by != SortBy.Probability) WireHeaderFilter(sortHeaders[num4], by);
+			}
+			filterCaption = T(contentStartPosition, 118, 24, 12u, "");
+			previousPage = B(contentStartPosition, 68, 24, "上一页", () => ChangeFilterPage(-1));
+			nextPage = B(contentStartPosition, 68, 24, "下一页", () => ChangeFilterPage(1));
+			closeFilter = B(contentStartPosition, 60, 24, "收起", () => SetHeaderFilter(null));
+			foreach (var node in new NodeBase[] { filterCaption, previousPage, nextPage, closeFilter }) node.IsVisible = false;
+			for (int index = 0; index < filterItems.Length; index++)
+			{
+				int slot = index;
+				filterItems[index] = new NativeCheckOption(() => ToggleFilterItem(slot)) { IsVisible = false };
+				filterItems[index].AttachNode(fixedRoot);
 			}
 			counts.TextColor = MutedText;
 			attachParent = null;
@@ -834,6 +820,63 @@ internal sealed class MainWindow : ResponsiveAddon
 		b.CollisionNode.AddEvent(AtkEventType.MouseDown, callback);
 	}
 
+	private unsafe void WireHeaderFilter(TextButtonNode button, SortBy column)
+	{
+		button.TextTooltip = "左键排序，右键筛选";
+		button.CollisionNode.AddEvent(AtkEventType.MouseDown, (AtkEventListener* _, AtkEventType _, int _, AtkEvent* evt, AtkEventData* data) =>
+		{
+			if (data == null || data->MouseData.ButtonId != 1) return;
+			SetHeaderFilter(headerFilter == column ? null : column);
+			if (evt != null) evt->SetEventIsHandled();
+		});
+	}
+
+	private void SetHeaderFilter(SortBy? column)
+	{
+		headerFilter = column;
+		filterPage = 0;
+		if (lastSnapshot != null) Reflow(lastSnapshot);
+	}
+
+	private void ChangeFilterPage(int delta)
+	{
+		filterPage += delta;
+		if (lastSnapshot != null) Reflow(lastSnapshot);
+	}
+
+	private void ToggleFilterItem(int slot)
+	{
+		if (lastSnapshot is not { } snapshot) return;
+		int index = filterPage * filterItems.Length + slot;
+		if (headerFilter == SortBy.Server && index < snapshot.Worlds.Count) actions.ToggleWorld(snapshot.Worlds[index]);
+		if (headerFilter == SortBy.Version && index < snapshot.HuntFilters.Count) actions.ToggleHuntFilter(snapshot.HuntFilters[index].Key);
+	}
+
+	private float LayoutHeaderFilter(MainSnapshot snapshot, float width, float y)
+	{
+		bool open = headerFilter.HasValue, worlds = headerFilter == SortBy.Server;
+		int count = worlds ? snapshot.Worlds.Count : snapshot.HuntFilters.Count;
+		int pages = Math.Max(1, (count + filterItems.Length - 1) / filterItems.Length);
+		filterPage = Math.Clamp(filterPage, 0, pages - 1);
+		filterCaption!.IsVisible = closeFilter!.IsVisible = open;
+		previousPage!.IsVisible = open && filterPage > 0;
+		nextPage!.IsVisible = open && filterPage + 1 < pages;
+		if (open)
+		{
+			SetT(filterCaption, $"{(worlds ? "服务器" : "怪名")}筛选 {filterPage + 1}/{pages}");
+			y = Flow(width, y, filterCaption, previousPage, nextPage, closeFilter);
+		}
+		for (int slot = 0; slot < filterItems.Length; slot++)
+		{
+			int index = filterPage * filterItems.Length + slot;
+			var item = filterItems[slot];
+			if (!(item.IsVisible = open && index < count)) continue;
+			if (worlds) item.Apply(snapshot.Worlds[index], snapshot.WorldOn[index], width, textColor:ServerColors.ForWorld(snapshot.Worlds[index]));
+			else item.Apply(snapshot.HuntFilters[index].Label, snapshot.HuntFilters[index].IsChecked, width);
+		}
+		return open ? Flow(width, y, filterItems) : y;
+	}
+
 	private void SetSort(SortBy by)
 	{
 		if (sortActive && sortBy == by)
@@ -988,15 +1031,6 @@ internal sealed class MainWindow : ResponsiveAddon
 		actions.Expand(key);
 	}
 
-	private void CollapseDetails()
-	{
-		if (expandedKey.Length != 0)
-		{
-			expandedKey = "";
-			actions.Expand("");
-		}
-	}
-
 	private void BuildDetail()
 	{
 		if (detailBuilt)
@@ -1050,7 +1084,6 @@ internal sealed class MainWindow : ResponsiveAddon
 		{
 			int idx = detailBtns.Count;
 			detailActions.Add(null);
-			detailLayout.Add((0f, 0f, 0f));
 			TextButtonNode textButtonNode = B(contentStartPosition, 60f, 22f, "", () =>
 			{
 				detailActions[idx]?.Invoke();
@@ -1084,53 +1117,16 @@ internal sealed class MainWindow : ResponsiveAddon
 		}
 	}
 
-	private List<(float x, int line)> LayCoordLines(List<(string text, Vector4 idle, Vector4 hover, Action act)> coords, float startX, float rightEdge, float actionReserve)
+	private void SetDetailButton(int index, string label, Vector4 idle, Vector4 hover, Action action, string tooltip = "")
 	{
-		List<(float, int)> list = new List<(float, int)>(coords.Count);
-		if (coords.Count == 0)
-		{
-			return list;
-		}
-		int num = -1;
-		int num2 = 0;
-		while (num2++ <= coords.Count + 2)
-		{
-			list.Clear();
-			float num3 = startX;
-			int num4 = 0;
-			float num5 = ((num == 0) ? (rightEdge - actionReserve) : rightEdge);
-			for (int i = 0; i < coords.Count; i++)
-			{
-				float num6 = NativeButtonStyle.Measure(coords[i].text) + 16f;
-				if (num3 + num6 > num5 && num3 > startX + 0.5f)
-				{
-					num4++;
-					num3 = startX;
-					num5 = ((num4 == num) ? (rightEdge - actionReserve) : rightEdge);
-				}
-				list.Add((num3, num4));
-				num3 += num6 + 14f;
-			}
-			if (num < 0)
-			{
-				num = ((list.Count > 0) ? list[list.Count - 1].Item2 : 0);
-				continue;
-			}
-			int num7 = 0;
-			foreach (var item in list)
-			{
-				if (item.Item2 > num7)
-				{
-					num7 = item.Item2;
-				}
-			}
-			if (num7 <= num)
-			{
-				break;
-			}
-			num = num7;
-		}
-		return new List<(float, int)>(list);
+		EnsureDetailBtns(index + 1);
+		var button = detailBtns[index];
+		if (button.String.ToString() != label)
+			NativeButtonStyle.Apply(button, label, 240, 26, false);
+		NativeButtonStyle.Paint(button, idle, hover);
+		if (button.TextTooltip.ToString() != tooltip) button.TextTooltip = tooltip;
+		detailActions[index] = action;
+		button.IsVisible = true;
 	}
 
 	internal void Apply(MainSnapshot s)
@@ -1325,16 +1321,6 @@ internal sealed class MainWindow : ResponsiveAddon
 		}
 		MainHuntRow expanded = ((expandedKey.Length > 0) ? s.Hunts.Find((MainHuntRow x) => string.Equals(x.Key, expandedKey, StringComparison.Ordinal)) : null);
 		bool flag7 = expanded is { Expanded: true } && detailOk;
-		if (bHideHunt != null) bHideHunt.IsVisible = flag7;
-		if (bWatchHunt != null)
-		{
-			bWatchHunt.IsVisible = flag7;
-			if (expanded != null)
-			{
-				NativeButtonStyle.Apply(bWatchHunt, expanded.Watched ? "移出悬浮窗" : "加入悬浮窗", 160, 26, false);
-				bWatchHunt.TextTooltip = expanded.World + " · " + expanded.Cn;
-			}
-		}
 		if (bHidden != null) NativeButtonStyle.Apply(bHidden, s.HiddenCount > 0 ? $"已隐藏 {s.HiddenCount}" : "已隐藏", 100, 26, false);
 		try
 		{
@@ -1352,35 +1338,22 @@ internal sealed class MainWindow : ResponsiveAddon
 			{
 				detailBtns[num].IsVisible = false;
 			}
-			detailLineCount = 0;
 			if (flag7 && expanded != null)
 			{
-				List<(string, Vector4, Vector4, Action)> list = new List<(string, Vector4, Vector4, Action)>();
-				foreach (MainPointRow pt in expanded.Points)
+				int buttonIndex = 0;
+				if (expanded.Points.Any(point => point.Aetheryte))
+					SetDetailButton(buttonIndex++, "大水晶", AetIdle, AetHover, () => actions.FlagAetheryte(expanded.Map, expanded.Cn));
+				SetDetailButton(buttonIndex++, expanded.Watched ? "移出悬浮窗" : "加入悬浮窗", ActIdle, ActHover,
+					() => actions.ToggleWatch(expanded.En, expanded.World), expanded.World + " · " + expanded.Cn);
+				SetDetailButton(buttonIndex++, expanded.Triggered ? "已被抢触" : expanded.HasSpecial ? "执行触发" : "自动前往",
+					expanded.Triggered ? ActBlocked : ActIdle, expanded.Triggered ? ActBlocked : ActHover,
+					() => actions.Primary(expanded.En, expanded.World));
+				foreach (var point in expanded.Points)
 				{
-					if (!pt.Aetheryte && !pt.Special)
-					{
-						list.Add(($"({pt.X:0.0}, {pt.Y:0.0})", CoordIdle, CoordHover, () =>
-						{
-							actions.Flag(expanded.Map, pt.X, pt.Y);
-						}));
-					}
+					if (!point.Aetheryte && !point.Special)
+						SetDetailButton(buttonIndex++, $"({point.X:0.0}, {point.Y:0.0})", CoordIdle, CoordHover,
+							() => actions.Flag(expanded.Map, point.X, point.Y));
 				}
-				List<(string, Vector4, Vector4, Action)> list2 = new List<(string, Vector4, Vector4, Action)>();
-				if (expanded.Points.Any((MainPointRow p) => p.Aetheryte))
-				{
-					list2.Add(("大水晶", AetIdle, AetHover, () =>
-					{
-						actions.FlagAetheryte(expanded.Map, expanded.Cn);
-					}));
-				}
-				list2.Add(((string, Vector4, Vector4, Action))(expanded.Triggered ? ("已被抢触", ActBlocked, ActBlocked, () =>
-				{
-					actions.Primary(expanded.En, expanded.World);
-				}) : (expanded.HasSpecial ? "执行触发" : "自动前往", ActIdle, ActHover, () =>
-				{
-					actions.Primary(expanded.En, expanded.World);
-				})));
 				HuntConditionHelper.HuntCondition condition = HuntConditionHelper.GetCondition(expanded.En);
 				var definition = ConditionCatalog.Find(expanded.En);
 				if (detailTime != null)
@@ -1400,7 +1373,6 @@ internal sealed class MainWindow : ResponsiveAddon
 					detailCond.String = definition.Method;
 					detailCond.TextColor = CondNeutral;
 				}
-				float num2 = 0f;
 				if ((object)condition != null && detailCond != null)
 				{
 					detailCond.IsVisible = true;
@@ -1417,59 +1389,7 @@ internal sealed class MainWindow : ResponsiveAddon
 						textColor = CondNeutral;
 					}
 					textNode.TextColor = textColor;
-					num2 = NativeButtonStyle.Measure(condition.Text) + 6f;
-					detailCondRelX = 20f;
-					detailCondRelY = 0f;
-					detailCondW = num2;
 				}
-				detailLabelW = NativeButtonStyle.Measure("目的地与操作") + 6f;
-				detailLabelRelX = 20f + ((num2 > 0f) ? (num2 + 14f) : 0f);
-				detailLabelRelY = 0f;
-				float num3 = detailLabelRelX + detailLabelW + 14f;
-				float num4 = 568f;
-				float num5 = 0f;
-				foreach (var item in list2)
-				{
-					num5 += NativeButtonStyle.Measure(item.Item1) + 16f + 14f;
-				}
-				if (num5 > 0f)
-				{
-					num5 -= 14f;
-				}
-				float actionReserve = ((num5 > 0f) ? (num5 + 14f) : 0f);
-				List<(float, int)> list3 = LayCoordLines(list, num3, num4, actionReserve);
-				int num6 = ((list3.Count > 0) ? list3.Max(((float x, int line) p) => p.line) : 0);
-				int num7 = num6 + 1;
-				float num8 = Math.Max(num4 - num5, num3);
-				EnsureDetailBtns(list.Count + list2.Count);
-				int num9 = 0;
-				foreach (var item2 in list3)
-				{
-					(string, Vector4, Vector4, Action) tuple = list[num9];
-					float num10 = NativeButtonStyle.Measure(tuple.Item1) + 32f;
-					TextButtonNode textButtonNode4 = detailBtns[num9];
-					textButtonNode4.IsVisible = true;
-					NativeButtonStyle.SizePin(textButtonNode4, num10, 22f);
-					NativeButtonStyle.Paint(textButtonNode4, tuple.Item2, tuple.Item3);
-					NativeButtonStyle.SetLabel(textButtonNode4, tuple.Item1);
-					detailActions[num9] = tuple.Item4;
-					detailLayout[num9] = (item2.Item1, (float)item2.Item2 * 22f, num10);
-					num9++;
-				}
-				foreach (var item3 in list2)
-				{
-					float num11 = NativeButtonStyle.Measure(item3.Item1) + 32f;
-					TextButtonNode textButtonNode5 = detailBtns[num9];
-					textButtonNode5.IsVisible = true;
-					NativeButtonStyle.SizePin(textButtonNode5, num11, 22f);
-					NativeButtonStyle.Paint(textButtonNode5, item3.Item2, item3.Item3);
-					NativeButtonStyle.SetLabel(textButtonNode5, item3.Item1);
-					detailActions[num9] = item3.Item4;
-					detailLayout[num9] = (num8, (float)num6 * 22f, num11);
-					num8 += num11 + 14f;
-					num9++;
-				}
-				detailLineCount = num7;
 			}
 		}
 		catch (Exception ex6)
@@ -1545,6 +1465,7 @@ internal sealed class MainWindow : ResponsiveAddon
         sortHeaders[1].Position = new Vector2(nameX, y);
         sortHeaders[2].Position = new Vector2(barX, y);
         y += 30;
+        y = LayoutHeaderFilter(s, w, y);
         fixedRoot.Size = new Vector2(w, y);
         float visibleStart = scroll.ScrollBarNode.ScrollPosition;
         float visibleEnd = visibleStart + BodyHeight;
@@ -1608,15 +1529,6 @@ internal sealed class MainWindow : ResponsiveAddon
                 button.Position=new Vector2(dx,y); dx+=button.Width+8; lineH=MathF.Max(lineH,button.Height);
             }
             y+=lineH+8;
-            float actionsX = 20;
-            foreach (var button in new[] { bWatchHunt, bHideHunt })
-            {
-                if (button == null || !button.IsVisible) continue;
-                if (actionsX + button.Width > w && actionsX > 20) { actionsX = 20; y += 32; }
-                button.Position = new Vector2(actionsX, y);
-                actionsX += button.Width + 8;
-            }
-            y += 34;
             detailBottom = y;
         }
         for (int i = slot; i < rows.Count; i++)

@@ -2,6 +2,8 @@ using System.Collections.Generic;
 
 namespace SrankFlag;
 
+internal readonly record struct MainHuntFilter(string Key, string Label, bool IsChecked);
+
 internal sealed class MainSnapshot
 {
 	internal bool Ready;
@@ -34,6 +36,8 @@ internal sealed class MainSnapshot
 	internal readonly List<string> Worlds = new List<string>();
 
 	internal readonly List<bool> WorldOn = new List<bool>();
+
+	internal readonly List<MainHuntFilter> HuntFilters = new();
 
 	internal readonly List<string> Dcs = new List<string>();
 

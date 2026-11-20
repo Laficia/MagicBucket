@@ -74,7 +74,7 @@ internal sealed class MainActions
 	internal Action OpenConditions = () => { };
 	internal Action OpenWatch = () => { };
 	internal Action OpenHidden = () => { };
-	internal Action<string> HideHunt = _ => { };
+	internal Action<string> ToggleHuntFilter = _ => { };
 	internal Action<string, string> ToggleWatch = (_, _) => { };
 
 	internal Action<string, string> Primary = (string _, string _) =>
